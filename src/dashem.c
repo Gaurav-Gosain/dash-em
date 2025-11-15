@@ -1009,6 +1009,7 @@ static int dashem_remove_neon(
 
     size_t out_idx = 0;
     size_t i = 0;
+    size_t write_pos = 0;  /* PERSISTENT across chunks - tracks "output everything up to here" */
     const unsigned char *in_ptr = (const unsigned char *)input;
     unsigned char *out_ptr = (unsigned char *)output;
 
@@ -1018,10 +1019,10 @@ static int dashem_remove_neon(
     const uint8x16_t pattern_0x94 = vdupq_n_u8(0x94);
 
     /* Process 16 bytes at a time with NEON */
-    while (i + 16 <= input_len) {
+    while (i + 18 <= input_len) {  /* +18 to account for overlapped loads at +1 and +2 */
         uint8x16_t v0 = vld1q_u8((const uint8_t *)(input + i));
-        uint8x16_t v1 = (i + 1 < input_len) ? vld1q_u8((const uint8_t *)(input + i + 1)) : vdupq_n_u8(0);
-        uint8x16_t v2 = (i + 2 < input_len) ? vld1q_u8((const uint8_t *)(input + i + 2)) : vdupq_n_u8(0);
+        uint8x16_t v1 = vld1q_u8((const uint8_t *)(input + i + 1));
+        uint8x16_t v2 = vld1q_u8((const uint8_t *)(input + i + 2));
 
         /* Check all 3 bytes in parallel */
         uint8x16_t cmp0 = vceqq_u8(v0, pattern_0xe2);
@@ -1037,8 +1038,14 @@ static int dashem_remove_neon(
 
         /* Fast path: no em-dashes in this chunk */
         if (mask_low == 0 && mask_high == 0) {
-            memcpy(out_ptr + out_idx, input + i, 16);
-            out_idx += 16;
+            /* Even with no matches, we need to respect write_pos from previous chunks. */
+            size_t chunk_end = i + 16;
+            if (write_pos < chunk_end) {
+                size_t copy_len = chunk_end - write_pos;
+                memcpy(out_ptr + out_idx, input + write_pos, copy_len);
+                out_idx += copy_len;
+                write_pos = chunk_end;
+            }
             i += 16;
             continue;
         }
@@ -1047,18 +1054,21 @@ static int dashem_remove_neon(
         uint8_t match_bytes[16];
         vst1q_u8(match_bytes, full_match);
 
-        size_t write_pos = i;
         for (int j = 0; j < 16; j++) {
             if (match_bytes[j] != 0) {
-                /* Found match at position j */
-                if (i + j > write_pos) {
-                    size_t copy_len = (i + j) - write_pos;
+                /* Found match at position j in current chunk at global position i+j */
+                size_t match_pos = i + j;
+
+                /* Copy bytes before this match */
+                if (match_pos > write_pos) {
+                    size_t copy_len = match_pos - write_pos;
                     memcpy(out_ptr + out_idx, input + write_pos, copy_len);
                     out_idx += copy_len;
                 }
-                /* Skip em-dash (3 bytes) */
-                write_pos = i + j + 3;
-                j += 2;  /* Skip next 2 iterations */
+
+                /* Move past the em-dash (3 bytes) */
+                write_pos = match_pos + 3;
+                j += 2;  /* Skip next 2 iterations (those are the 0x80 and 0x94 bytes) */
             }
         }
 
@@ -1069,19 +1079,25 @@ static int dashem_remove_neon(
             memcpy(out_ptr + out_idx, input + write_pos, remaining);
             out_idx += remaining;
         }
+        /* Only advance write_pos to chunk_end if we haven't already passed it */
+        if (write_pos < chunk_end) {
+            write_pos = chunk_end;
+        }
 
         i = chunk_end;
     }
 
-    /* Process remainder with scalar */
-    while (i < input_len) {
-        if (i + 3 <= input_len &&
-            in_ptr[i] == 0xE2 &&
-            in_ptr[i + 1] == 0x80 &&
-            in_ptr[i + 2] == 0x94) {
-            i += 3;
+    /* Process remainder with scalar, starting from write_pos */
+    size_t scalar_start = (i > 0) ? write_pos : 0;
+    while (scalar_start < input_len) {
+        if (scalar_start + 3 <= input_len &&
+            in_ptr[scalar_start] == 0xE2 &&
+            in_ptr[scalar_start + 1] == 0x80 &&
+            in_ptr[scalar_start + 2] == 0x94) {
+            /* Skip em-dash */
+            scalar_start += 3;
         } else {
-            out_ptr[out_idx++] = in_ptr[i++];
+            out_ptr[out_idx++] = in_ptr[scalar_start++];
         }
     }
 
