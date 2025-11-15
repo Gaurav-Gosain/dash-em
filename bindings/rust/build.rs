@@ -3,10 +3,23 @@ fn main() {
     // Note: We don't use -march=native because it breaks binary portability
     // The C library will be compiled with baseline x86-64 instructions
 
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let dashem_src = std::path::Path::new(manifest_dir)
+        .parent()
+        .and_then(|p| p.parent())
+        .map(|p| p.join("src").join("dashem.c"))
+        .expect("Failed to find dashem source");
+
+    let dashem_include = std::path::Path::new(manifest_dir)
+        .parent()
+        .and_then(|p| p.parent())
+        .map(|p| p.join("src"))
+        .expect("Failed to find dashem include dir");
+
     let mut builder = cc::Build::new();
     builder
-        .file("../../src/dashem.c")
-        .include("../../src")
+        .file(dashem_src)
+        .include(dashem_include)
         .opt_level(3)
         .warnings(true);
 
