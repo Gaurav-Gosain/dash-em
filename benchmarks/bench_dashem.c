@@ -10,6 +10,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#ifdef _WIN32
+    #include <windows.h>
+#endif
 #include "../src/dashem.h"
 
 #define ITERATIONS 1000
@@ -59,9 +62,18 @@ static char* naive_remove(const char* input, size_t input_len, size_t* out_len) 
  * Measure time in microseconds
  */
 static double get_time_us(void) {
+#ifdef _WIN32
+    /* Windows implementation using QueryPerformanceCounter */
+    LARGE_INTEGER freq, counter;
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&counter);
+    return (double)counter.QuadPart / (double)freq.QuadPart * 1e6;
+#else
+    /* POSIX implementation using clock_gettime */
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (double)ts.tv_sec * 1e6 + (double)ts.tv_nsec / 1e3;
+#endif
 }
 
 /**

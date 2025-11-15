@@ -104,7 +104,7 @@ static napi_value implementationName(napi_env env, napi_callback_info info) {
 /**
  * Module initialization
  */
-static napi_value init(napi_env env, napi_exports exports) {
+napi_value init(napi_env env, napi_value exports) {
     napi_status status = napi_ok;
 
     /* Export functions */
@@ -149,4 +149,4 @@ static napi_value init(napi_env env, napi_exports exports) {
     return exports;
 }
 
-NAPI_MODULE(dashem, init)
+NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
