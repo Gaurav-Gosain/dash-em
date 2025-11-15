@@ -398,6 +398,12 @@ static int dashem_remove_avx2_unrolled(
 
     /* Process 64 bytes at a time (two 32-byte chunks) with unrolled loop */
     while (i + 64 <= input_len) {
+        /* Software prefetch for upcoming iterations (2 iterations ahead) */
+        if (i + 128 < input_len) {
+            _mm_prefetch(input + i + 128, _MM_HINT_T0);
+            _mm_prefetch(input + i + 160, _MM_HINT_T0);
+        }
+
         /* First 32-byte chunk */
         __m256i v0_a = _mm256_loadu_si256((__m256i *)(input + i));
         __m256i v1_a = _mm256_loadu_si256((__m256i *)(input + i + 1));
