@@ -193,6 +193,20 @@ target_include_directories(test_dashem PRIVATE src)
 
 add_test(NAME DashemTests COMMAND test_dashem)
 
+# Comprehensive correctness tests with edge cases
+add_executable(comprehensive_tests tests/comprehensive_tests.c)
+target_link_libraries(comprehensive_tests PRIVATE dashem_static)
+target_include_directories(comprehensive_tests PRIVATE src)
+
+add_test(NAME ComprehensiveTests COMMAND comprehensive_tests)
+
+# Fuzzing test suite
+add_executable(fuzzer tests/fuzzer.c)
+target_link_libraries(fuzzer PRIVATE dashem_static)
+target_include_directories(fuzzer PRIVATE src)
+
+add_test(NAME FuzzingTests COMMAND fuzzer)
+
 # ============================================================================
 # Benchmarks
 # ============================================================================

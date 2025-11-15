@@ -163,6 +163,8 @@ typedef struct {
     const char* name;
     double time_us;
     size_t output_size;
+    char* reference_output;  /* For validation */
+    size_t reference_len;
 } BenchResult;
 
 static BenchResult benchmark_impl(
@@ -171,14 +173,28 @@ static BenchResult benchmark_impl(
     const char* input,
     size_t input_len
 ) {
-    BenchResult result = {name, 0, 0};
+    BenchResult result = {name, 0, 0, NULL, 0};
     int iterations = GET_ITERATIONS(input_len);
+
+    /* First run: get reference output for validation */
+    size_t ref_len = 0;
+    char* ref_output = impl(input, input_len, &ref_len);
+    result.reference_output = ref_output;
+    result.reference_len = ref_len;
 
     double start = get_time_us();
     for (int i = 0; i < iterations; i++) {
         size_t out_len = 0;
         char* output = impl(input, input_len, &out_len);
         result.output_size = out_len;
+
+        /* Validate output matches reference */
+        if (out_len != ref_len || memcmp(output, ref_output, out_len) != 0) {
+            fprintf(stderr, "ERROR: %s produced incorrect output!\n", name);
+            fprintf(stderr, "  Expected size: %zu, Got: %zu\n", ref_len, out_len);
+            free(output);
+            exit(1);
+        }
         free(output);
     }
     double end = get_time_us();
@@ -187,8 +203,8 @@ static BenchResult benchmark_impl(
     return result;
 }
 
-static BenchResult benchmark_dashem(const char* input, size_t input_len) {
-    BenchResult result = {"dash-em", 0, 0};
+static BenchResult benchmark_dashem(const char* input, size_t input_len, const char* reference, size_t ref_len) {
+    BenchResult result = {"dash-em", 0, 0, NULL, ref_len};
     int iterations = GET_ITERATIONS(input_len);
 
     double start = get_time_us();
@@ -197,6 +213,13 @@ static BenchResult benchmark_dashem(const char* input, size_t input_len) {
         size_t out_len = 0;
         dashem_remove(input, input_len, output_buf, sizeof(output_buf), &out_len);
         result.output_size = out_len;
+
+        /* Validate output matches reference */
+        if (out_len != ref_len || memcmp(output_buf, reference, out_len) != 0) {
+            fprintf(stderr, "ERROR: dash-em produced incorrect output!\n");
+            fprintf(stderr, "  Expected size: %zu, Got: %zu\n", ref_len, out_len);
+            exit(1);
+        }
     }
     double end = get_time_us();
 
@@ -245,7 +268,7 @@ int main(void) {
         printf("───────────────────────────────────────────────────────────────────────────\n");
 
         BenchResult naive = benchmark_impl("Naive Implementation", naive_remove, input, input_len);
-        BenchResult dashem = benchmark_dashem(input, input_len);
+        BenchResult dashem = benchmark_dashem(input, input_len, naive.reference_output, naive.reference_len);
 
         /* Format with adaptive precision for very small times */
         if (naive.time_us < 0.01) {
@@ -269,6 +292,7 @@ int main(void) {
         total_dashem_time += dashem.time_us;
         test_count++;
         free(input);
+        free(naive.reference_output);  /* Free reference output after validation */
     }
 
     printf("================================================================================\n");
