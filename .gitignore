@@ -1,0 +1,57 @@
+# Build artifacts
+build/
+dist/
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.lib
+
+# CMake
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.eggs/
+.Python
+pip-log.txt
+.coverage
+
+# Node.js
+node_modules/
+package-lock.json
+yarn.lock
+*.tsbuildinfo
+
+# Rust
+target/
+Cargo.lock
+
+# Go
+vendor/
+go.sum
+
+# WebAssembly
+wasm/build/
+*.wasm
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Dependencies
+venv/
+.env
