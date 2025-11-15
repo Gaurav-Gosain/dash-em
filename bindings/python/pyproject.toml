@@ -9,7 +9,6 @@ include-package-data = true
 name = "dash-em"
 version = "1.0.0"
 description = "Enterprise-Grade Em-Dash Removal Library — SIMD-Accelerated String Processing"
-readme = "../../README.md"
 requires-python = ">=3.10"
 authors = [
     { name = "Gaurav Gosain", email = "gaurav@example.com" }

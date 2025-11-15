@@ -8,7 +8,7 @@ import sys
 
 def get_compile_args():
     """Get platform-specific compile arguments"""
-    args = ['-O3', '-Wall', '-Wextra']
+    args = ['-O3', '-Wall', '-Wextra', '-Wno-unused-variable']
 
     # Use portable x86-64 baseline instead of -march=native for wheel compatibility
     # This ensures wheels can run on any x86-64 CPU, not just the build machine
