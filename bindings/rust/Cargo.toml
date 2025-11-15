@@ -10,6 +10,15 @@ categories = ["text-processing", "algorithms", "performance"]
 repository = "https://github.com/Gaurav-Gosain/dash-em"
 homepage = "https://github.com/Gaurav-Gosain/dash-em"
 readme = "../../README.md"
+include = [
+    "Cargo.toml",
+    "Cargo.lock",
+    "build.rs",
+    "src/**/*",
+    "examples/**/*",
+    "../../src/dashem.c",
+    "../../src/dashem.h",
+]
 
 [lib]
 name = "dashem"
