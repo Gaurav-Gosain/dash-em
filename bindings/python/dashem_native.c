@@ -6,6 +6,7 @@
  * em-dash removal library for use by the dashem.py wrapper.
  */
 
+#define PY_SSIZE_T_CLEAN
 #include <Python.h>
 #include "dashem.h"
 
