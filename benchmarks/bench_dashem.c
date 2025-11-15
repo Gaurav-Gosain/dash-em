@@ -42,6 +42,63 @@ static char* generate_test_string(size_t num_dashes, size_t* out_len) {
 }
 
 /**
+ * Generate test string with specified em-dash density percentage
+ */
+static char* generate_test_with_density(size_t base_size, int density_percent, size_t* out_len) {
+    char* str = (char*)malloc(base_size * 2);
+    size_t pos = 0;
+
+    for (size_t i = 0; i < base_size; i += 100) {
+        if ((rand() % 100) < density_percent) {
+            /* Insert em-dash (3 bytes UTF-8) */
+            if (pos + 3 <= base_size * 2) {
+                memcpy(str + pos, "\xe2\x80\x94", 3);
+                pos += 3;
+            }
+        } else {
+            /* Insert regular text */
+            for (int j = 0; j < 10 && pos < base_size * 2; j++) {
+                str[pos++] = 'A' + (rand() % 26);
+            }
+        }
+    }
+
+    *out_len = pos;
+    return str;
+}
+
+/**
+ * Generate test string with NO em-dashes (fast path test)
+ */
+static char* generate_no_dashes(size_t size, size_t* out_len) {
+    char* str = (char*)malloc(size);
+    for (size_t i = 0; i < size - 1; i++) {
+        str[i] = 'A' + (i % 26);
+    }
+    str[size - 1] = '\0';
+    *out_len = size - 1;
+    return str;
+}
+
+/**
+ * Generate test string with alternating pattern (very dense em-dashes)
+ */
+static char* generate_alternating_dashes(size_t num_dashes, size_t* out_len) {
+    char* str = (char*)malloc(num_dashes * 4);
+    size_t pos = 0;
+
+    for (size_t i = 0; i < num_dashes; i++) {
+        /* Alternate: em-dash, single char, em-dash, single char, ... */
+        memcpy(str + pos, "\xe2\x80\x94", 3);
+        pos += 3;
+        str[pos++] = 'a';
+    }
+
+    *out_len = pos;
+    return str;
+}
+
+/**
  * Naive string replacement implementation
  */
 static char* naive_remove(const char* input, size_t input_len, size_t* out_len) {
@@ -128,44 +185,77 @@ static BenchResult benchmark_dashem(const char* input, size_t input_len) {
 }
 
 int main(void) {
-    printf("=============================================================================\n");
-    printf("dash-em Performance Benchmark Suite\n");
+    printf("================================================================================\n");
+    printf("dash-em: Enhanced Performance Benchmark Suite\n");
     printf("Implementation: %s\n", dashem_implementation_name());
-    printf("=============================================================================\n\n");
+    printf("================================================================================\n\n");
 
-    /* Test configurations */
-    struct {
-        size_t num_dashes;
+    srand(12345);  /* Deterministic random seed for reproducibility */
+
+    /* Test configurations: various patterns and densities */
+    typedef struct {
+        char* (*generator)(size_t, size_t*);
+        size_t param;
         const char* label;
+        const char* description;
+    } BenchConfig;
+
+    /* Test configurations simplified to use only base generators */
+    struct {
+        char* (*generator)(size_t, size_t*);
+        size_t param;
+        const char* label;
+        const char* description;
     } tests[] = {
-        {100, "100 em-dashes"},
-        {1000, "1,000 em-dashes"},
-        {10000, "10,000 em-dashes"},
+        /* Pattern 1: No em-dashes (fast path) */
+        {generate_no_dashes, 100000, "NO EM-DASHES", "Fast path: no patterns to match"},
+
+        /* Pattern 2: Regular pattern with standard density */
+        {generate_test_string, 1000, "REGULAR PATTERN", "Standard: 1000 em-dashes"},
+
+        /* Pattern 3: Alternating/Dense pattern */
+        {generate_alternating_dashes, 5000, "ALTERNATING PATTERN", "Dense: em-dash every 4 bytes"},
+
+        /* Pattern 4: Very large input */
+        {generate_test_string, 100000, "LARGE INPUT (100K DASHES)", "Large-scale: 100K em-dashes"},
     };
+
+    double total_dashem_time = 0;
+    int test_count = 0;
 
     for (size_t t = 0; t < sizeof(tests) / sizeof(tests[0]); t++) {
         size_t input_len = 0;
-        char* input = generate_test_string(tests[t].num_dashes, &input_len);
+        char* input = tests[t].generator(tests[t].param, &input_len);
 
-        printf("Benchmark: %s (Input size: %zu bytes)\n", tests[t].label, input_len);
+        printf("[Test %zu/%zu] %s\n", t + 1, sizeof(tests) / sizeof(tests[0]), tests[t].label);
+        printf("             %s\n", tests[t].description);
+        printf("             Input size: %zu bytes\n", input_len);
         printf("───────────────────────────────────────────────────────────────────────────\n");
 
         BenchResult naive = benchmark_impl("Naive Implementation", naive_remove, input, input_len);
         BenchResult dashem = benchmark_dashem(input, input_len);
 
-        printf("%-30s | %12.2f µs | %12.2f ms\n", naive.name, naive.time_us, naive.time_us / 1000);
-        printf("%-30s | %12.2f µs | %12.2f ms\n", dashem.name, dashem.time_us, dashem.time_us / 1000);
+        printf("  %-28s: %12.2f µs (%10.3f ms)\n", naive.name, naive.time_us, naive.time_us / 1000);
+        printf("  %-28s: %12.2f µs (%10.3f ms)\n", dashem.name, dashem.time_us, dashem.time_us / 1000);
 
         double speedup = naive.time_us / dashem.time_us;
-        printf("%-30s | %12.2fx speedup\n", "Relative Performance", speedup);
+        double throughput_gb_s = (input_len / (1024.0 * 1024.0 * 1024.0)) / (dashem.time_us / 1e6);
+        printf("  %-28s: %12.2fx speedup\n", "Speedup", speedup);
+        printf("  %-28s: %12.2f GB/s\n", "Throughput", throughput_gb_s);
         printf("\n");
 
+        total_dashem_time += dashem.time_us;
+        test_count++;
         free(input);
     }
 
-    printf("=============================================================================\n");
+    printf("================================================================================\n");
+    printf("Summary Statistics:\n");
+    printf("  Total tests run: %d\n", test_count);
+    printf("  Average time per test: %.2f µs\n", total_dashem_time / test_count);
+    printf("================================================================================\n");
     printf("Benchmark complete!\n");
-    printf("=============================================================================\n");
+    printf("================================================================================\n");
 
     return 0;
 }

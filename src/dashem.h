@@ -49,6 +49,15 @@ typedef enum {
 } dashem_cpu_flags_t;
 
 /**
+ * @brief UTF-8 validation modes for handling invalid sequences
+ */
+typedef enum {
+    DASHEM_UTF8_STRICT = 0,    /**< Reject invalid UTF-8 (return -2) */
+    DASHEM_UTF8_SKIP = 1,      /**< Skip invalid sequences */
+    DASHEM_UTF8_REPLACE = 2,   /**< Replace invalid bytes with U+FFFD (EF BF BD) */
+} dashem_utf8_mode_t;
+
+/**
  * @brief Detect available SIMD instruction sets
  *
  * Performs runtime CPU feature detection to determine optimal
@@ -119,6 +128,35 @@ const char* dashem_version(void);
  * @return Implementation name (e.g., "AVX2", "SSE4.2", "Scalar")
  */
 const char* dashem_implementation_name(void);
+
+/**
+ * @brief Remove em-dashes with UTF-8 validation
+ *
+ * Like dashem_remove(), but also validates and handles invalid UTF-8 sequences
+ * according to the specified mode.
+ *
+ * @param[in] input Pointer to input UTF-8 string
+ * @param[in] input_len Length of input string in bytes
+ * @param[out] output Pointer to output buffer
+ * @param[in] output_capacity Maximum size of output buffer in bytes
+ * @param[out] output_len Pointer to store actual output length
+ * @param[in] utf8_mode How to handle invalid UTF-8 sequences
+ *
+ * @return 0 on success
+ * @return -1 if output buffer is too small
+ * @return -2 if input is invalid or contains invalid UTF-8 (STRICT mode only)
+ *
+ * @note In REPLACE mode, output size may exceed input size if invalid sequences
+ *       are present (replacement sequence EF BF BD is 3 bytes)
+ */
+int dashem_remove_utf8(
+    const char *input,
+    size_t input_len,
+    char *output,
+    size_t output_capacity,
+    size_t *output_len,
+    dashem_utf8_mode_t utf8_mode
+);
 
 #ifdef __cplusplus
 }

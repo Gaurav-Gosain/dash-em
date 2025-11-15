@@ -13,6 +13,33 @@ set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# ============================================================================
+# Profile-Guided Optimization (PGO) Configuration
+# ============================================================================
+
+option(ENABLE_PGO "Enable Profile-Guided Optimization (two-pass compilation)" OFF)
+option(PGO_GENERATE "Generate PGO profile data" OFF)
+option(PGO_USE "Use PGO profile data for final compilation" OFF)
+
+# PGO flags for different compilers
+if(ENABLE_PGO AND PGO_GENERATE)
+    if(MSVC)
+        add_compile_options(/GL)  # Whole program optimization
+    else()
+        add_compile_options(-fprofile-generate)
+        string(APPEND CMAKE_EXE_LINKER_FLAGS " -fprofile-generate")
+    endif()
+    message(STATUS "PGO: Generating profile data")
+elseif(ENABLE_PGO AND PGO_USE)
+    if(MSVC)
+        add_compile_options(/GL)
+    else()
+        add_compile_options(-fprofile-use -fprofile-correction)
+        string(APPEND CMAKE_EXE_LINKER_FLAGS " -fprofile-use -fprofile-correction")
+    endif()
+    message(STATUS "PGO: Using profile data")
+endif()
+
 # Enable SIMD optimizations and aggressive optimization flags
 if(MSVC)
     # MSVC optimizations
@@ -32,9 +59,6 @@ else()
 
     # Add -fno-exceptions and -fno-rtti if using C only (not C++)
     add_compile_options(-fno-exceptions)
-
-    # Profile-guided optimization flags (can be enabled with -fprofile-use)
-    # add_compile_options(-fprofile-generate)
 endif()
 
 # Link-time optimization for GCC/Clang
