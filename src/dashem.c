@@ -102,9 +102,48 @@ static uint32_t __detect_cpu_features(void) {
 }
 #endif
 
-/* Global state for CPU feature detection */
+/* Global state for CPU feature detection and dispatch */
 static uint32_t g_cpu_features = 0;
 static int g_features_detected = 0;
+
+/* Function pointer for optimal implementation (cached after first call) */
+typedef int (*dashem_remove_fn)(
+    const char *input,
+    size_t input_len,
+    char *output,
+    size_t output_capacity,
+    size_t *output_len
+);
+static dashem_remove_fn g_dashem_remove_impl = NULL;
+
+/* Forward declarations for implementation functions */
+static int dashem_remove_scalar(
+    const char *input,
+    size_t input_len,
+    char *output,
+    size_t output_capacity,
+    size_t *output_len
+);
+
+#if defined(__AVX2__)
+static int dashem_remove_avx2_unrolled(
+    const char *input,
+    size_t input_len,
+    char *output,
+    size_t output_capacity,
+    size_t *output_len
+);
+#endif
+
+#if defined(__SSE4_2__)
+static int dashem_remove_sse42(
+    const char *input,
+    size_t input_len,
+    char *output,
+    size_t output_capacity,
+    size_t *output_len
+);
+#endif
 
 uint32_t dashem_detect_cpu_features(void) {
     if (!g_features_detected) {
@@ -112,6 +151,25 @@ uint32_t dashem_detect_cpu_features(void) {
         g_features_detected = 1;
     }
     return g_cpu_features;
+}
+
+/* Initialize the optimal implementation function pointer */
+static dashem_remove_fn dashem_init_impl(void) {
+    uint32_t features = dashem_detect_cpu_features();
+
+#if defined(__AVX2__)
+    if (features & DASHEM_CPU_AVX2) {
+        return dashem_remove_avx2_unrolled;
+    }
+#endif
+
+#if defined(__SSE4_2__)
+    if (features & DASHEM_CPU_SSE42) {
+        return dashem_remove_sse42;
+    }
+#endif
+
+    return dashem_remove_scalar;
 }
 
 /* ============================================================================
@@ -625,29 +683,12 @@ int dashem_remove(
         return dashem_remove_fast_small(input, input_len, output, output_capacity, output_len);
     }
 
-    /* Detect CPU features if not already done */
-    uint32_t features = dashem_detect_cpu_features();
-
-    /* Dispatch to optimal implementation */
-#if defined(__AVX2__)
-    if (features & DASHEM_CPU_AVX2) {
-        /* Use unrolled version for larger inputs, regular version for smaller */
-        if (input_len >= 64) {
-            return dashem_remove_avx2_unrolled(input, input_len, output, output_capacity, output_len);
-        } else {
-            return dashem_remove_avx2(input, input_len, output, output_capacity, output_len);
-        }
+    /* Initialize optimal implementation on first call, then use cached function pointer */
+    if (g_dashem_remove_impl == NULL) {
+        g_dashem_remove_impl = dashem_init_impl();
     }
-#endif
 
-#if defined(__SSE4_2__)
-    if (features & DASHEM_CPU_SSE42) {
-        return dashem_remove_sse42(input, input_len, output, output_capacity, output_len);
-    }
-#endif
-
-    /* Scalar fallback */
-    return dashem_remove_scalar(input, input_len, output, output_capacity, output_len);
+    return g_dashem_remove_impl(input, input_len, output, output_capacity, output_len);
 }
 
 const char* dashem_version(void) {
