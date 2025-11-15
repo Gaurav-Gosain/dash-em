@@ -41,17 +41,22 @@ elseif(ENABLE_PGO AND PGO_USE)
 endif()
 
 # ============================================================================
-# Memory Safety Option (Fil-C)
+# Memory Safety Option (Fil-C) - Dual Version Support
 # ============================================================================
 
-option(ENABLE_FILC "Compile with Fil-C for memory safety (if available)" OFF)
+option(BUILD_SAFE_VERSION "Build memory-safe version with Fil-C compiler" OFF)
 
-if(ENABLE_FILC)
-    # Use Fil-C compiler instead of default C compiler
-    set(CMAKE_C_COMPILER filc CACHE STRING "C compiler" FORCE)
-    message(STATUS "Memory safety: Using Fil-C compiler")
+# Check if Fil-C is available
+find_program(FILC_COMPILER filc)
+if(BUILD_SAFE_VERSION AND NOT FILC_COMPILER)
+    message(WARNING "BUILD_SAFE_VERSION enabled but 'filc' compiler not found in PATH")
+    message(STATUS "Install Fil-C from https://fil-c.org/ to build memory-safe version")
+    set(BUILD_SAFE_VERSION OFF)
+elseif(BUILD_SAFE_VERSION)
+    message(STATUS "Memory safety: Will build both standard and Fil-C memory-safe versions")
 else()
-    message(STATUS "Memory safety: Disabled (using standard compiler)")
+    message(STATUS "Memory safety: Disabled (building standard version only)")
+    message(STATUS "  Use -DBUILD_SAFE_VERSION=ON to build memory-safe version with Fil-C")
 endif()
 
 # Enable SIMD optimizations and aggressive optimization flags
@@ -127,6 +132,56 @@ else()
 endif()
 
 # ============================================================================
+# Memory-Safe Versions (Fil-C) - Optional
+# ============================================================================
+
+if(BUILD_SAFE_VERSION AND FILC_COMPILER)
+    message(STATUS "Building memory-safe versions with Fil-C compiler: ${FILC_COMPILER}")
+
+    # Create object files using Fil-C
+    set(DASHEM_SAFE_OBJ "${CMAKE_CURRENT_BINARY_DIR}/dashem_safe.o")
+
+    add_custom_command(
+        OUTPUT ${DASHEM_SAFE_OBJ}
+        COMMAND ${FILC_COMPILER}
+            -Wall -Wextra -Wpedantic
+            -O2 -c
+            -I${CMAKE_CURRENT_SOURCE_DIR}/src
+            -o ${DASHEM_SAFE_OBJ}
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/dashem.c
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/dashem.c
+        COMMENT "Compiling dashem.c with Fil-C for memory safety"
+        VERBATIM
+    )
+
+    add_custom_target(dashem_safe_obj DEPENDS ${DASHEM_SAFE_OBJ})
+
+    # Memory-safe shared library (using filc-compiled object)
+    add_library(dashem_safe SHARED)
+    target_sources(dashem_safe PRIVATE ${DASHEM_SAFE_OBJ})
+    add_dependencies(dashem_safe dashem_safe_obj)
+
+    target_include_directories(dashem_safe PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
+        $<INSTALL_INTERFACE:include>
+    )
+
+    # Memory-safe static library (using filc-compiled object)
+    add_library(dashem_safe_static STATIC)
+    target_sources(dashem_safe_static PRIVATE ${DASHEM_SAFE_OBJ})
+    add_dependencies(dashem_safe_static dashem_safe_obj)
+
+    target_include_directories(dashem_safe_static PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
+        $<INSTALL_INTERFACE:include>
+    )
+
+    message(STATUS "Memory-safe versions available: dashem_safe (shared) and dashem_safe_static (static)")
+    message(STATUS "These versions compiled with Fil-C for runtime memory safety checks")
+
+endif()
+
+# ============================================================================
 # Tests
 # ============================================================================
 
@@ -150,11 +205,19 @@ target_include_directories(bench_dashem PRIVATE src)
 # Installation
 # ============================================================================
 
-install(TARGETS dashem dashem_static
-    LIBRARY DESTINATION lib
-    ARCHIVE DESTINATION lib
-    RUNTIME DESTINATION bin
-)
+if(BUILD_SAFE_VERSION AND FILC_COMPILER)
+    install(TARGETS dashem dashem_static dashem_safe dashem_safe_static
+        LIBRARY DESTINATION lib
+        ARCHIVE DESTINATION lib
+        RUNTIME DESTINATION bin
+    )
+else()
+    install(TARGETS dashem dashem_static
+        LIBRARY DESTINATION lib
+        ARCHIVE DESTINATION lib
+        RUNTIME DESTINATION bin
+    )
+endif()
 
 install(FILES src/dashem.h DESTINATION include)
 
