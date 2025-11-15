@@ -3,23 +3,34 @@ fn main() {
     // Note: We don't use -march=native because it breaks binary portability
     // The C library will be compiled with baseline x86-64 instructions
 
-    let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    let dashem_src = std::path::Path::new(manifest_dir)
-        .parent()
-        .and_then(|p| p.parent())
-        .map(|p| p.join("src").join("dashem.c"))
-        .expect("Failed to find dashem source");
+    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
 
-    let dashem_include = std::path::Path::new(manifest_dir)
+    // Try normal location first (when used from monorepo)
+    let dashem_src = manifest_dir
         .parent()
         .and_then(|p| p.parent())
-        .map(|p| p.join("src"))
-        .expect("Failed to find dashem include dir");
+        .map(|p| p.join("src").join("dashem.c"));
+
+    // Fall back to src in manifest_dir if we're in a packaged tarball
+    let dashem_src = if let Some(ref p) = dashem_src {
+        if p.exists() {
+            p.clone()
+        } else {
+            manifest_dir.join("src").join("dashem.c")
+        }
+    } else {
+        manifest_dir.join("src").join("dashem.c")
+    };
+
+    let dashem_include = dashem_src.parent().expect("Failed to determine include directory").to_path_buf();
+
+    println!("cargo:warning=Using dashem source: {:?}", dashem_src);
+    println!("cargo:warning=Using dashem include: {:?}", dashem_include);
 
     let mut builder = cc::Build::new();
     builder
-        .file(dashem_src)
-        .include(dashem_include)
+        .file(&dashem_src)
+        .include(&dashem_include)
         .opt_level(3)
         .warnings(true);
 
