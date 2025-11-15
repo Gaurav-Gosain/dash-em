@@ -13,11 +13,37 @@ set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-# Enable SIMD optimizations
+# Enable SIMD optimizations and aggressive optimization flags
 if(MSVC)
+    # MSVC optimizations
     add_compile_options(/arch:AVX2)
+    add_compile_options(/O2)  # Favor speed
+    add_compile_options(/Oi)  # Intrinsic functions
+    add_compile_options(/Ot)  # Favor fast code
 else()
+    # GCC/Clang optimizations
     add_compile_options(-march=native)
+    add_compile_options(-O3)  # Maximum optimization
+    add_compile_options(-flto)  # Link-time optimization
+    add_compile_options(-funroll-loops)  # Unroll loops
+    add_compile_options(-finline-functions)  # Inline functions
+    add_compile_options(-ffast-math)  # Fast floating-point math
+    add_compile_options(-fomit-frame-pointer)  # Omit frame pointer
+
+    # Add -fno-exceptions and -fno-rtti if using C only (not C++)
+    add_compile_options(-fno-exceptions)
+
+    # Profile-guided optimization flags (can be enabled with -fprofile-use)
+    # add_compile_options(-fprofile-generate)
+endif()
+
+# Link-time optimization for GCC/Clang
+if(NOT MSVC)
+    set(CMAKE_AR "gcc-ar" CACHE FILEPATH "ar program")
+    set(CMAKE_RANLIB "gcc-ranlib" CACHE FILEPATH "ranlib program")
+    string(APPEND CMAKE_C_FLAGS " -flto")
+    string(APPEND CMAKE_EXE_LINKER_FLAGS " -flto")
+    string(APPEND CMAKE_SHARED_LINKER_FLAGS " -flto")
 endif()
 
 # ============================================================================

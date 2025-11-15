@@ -739,10 +739,10 @@ static int dashem_remove_neon(
             continue;
         }
 
-        /* Process matches byte by byte */
+        /* Process matches byte by byte using NEON lane extraction */
         size_t write_pos = i;
         for (int j = 0; j < 16; j++) {
-            if (((uint8_t *)full_match)[j] != 0) {
+            if (vgetq_lane_u8(full_match, j) != 0) {
                 /* Found match at position j */
                 if (i + j > write_pos) {
                     size_t copy_len = (i + j) - write_pos;
