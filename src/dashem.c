@@ -12,6 +12,34 @@
 #include <stdio.h>
 
 /* ============================================================================
+ * Portable CTZ (Count Trailing Zeros) Implementation
+ * ============================================================================ */
+
+/* Portable count trailing zeros - works on GCC, Clang, and MSVC */
+#ifdef _MSC_VER
+    #include <intrin.h>
+    static inline int dashem_ctz(uint32_t v) {
+        unsigned long r;
+        _BitScanForward(&r, v);
+        return (int)r;
+    }
+#elif defined(__GNUC__) || defined(__clang__)
+    #define dashem_ctz(x) __builtin_ctz(x)
+#else
+    /* Software fallback for other compilers */
+    static inline int dashem_ctz(uint32_t v) {
+        if (v == 0) return 32;
+        int count = 0;
+        if ((v & 0xFFFF) == 0) { count += 16; v >>= 16; }
+        if ((v & 0xFF) == 0) { count += 8; v >>= 8; }
+        if ((v & 0xF) == 0) { count += 4; v >>= 4; }
+        if ((v & 0x3) == 0) { count += 2; v >>= 2; }
+        if ((v & 0x1) == 0) { count += 1; }
+        return count;
+    }
+#endif
+
+/* ============================================================================
  * CPU Feature Detection
  * ============================================================================ */
 
@@ -204,7 +232,7 @@ static int dashem_remove_avx2(
 
         while (em_dash_mask != 0) {
             /* Find the next set bit position within remaining mask */
-            int match_offset = __builtin_ctz(em_dash_mask);  /* Position in remaining mask */
+            int match_offset = dashem_ctz(em_dash_mask);  /* Position in remaining mask */
             size_t match_pos = i + processed + match_offset;
 
             /* Copy bytes before this match */
@@ -307,7 +335,7 @@ static int dashem_remove_sse42(
 
         while (em_dash_mask != 0) {
             /* Find the next set bit position within remaining mask */
-            int match_offset = __builtin_ctz(em_dash_mask);  /* Position in remaining mask */
+            int match_offset = dashem_ctz(em_dash_mask);  /* Position in remaining mask */
             size_t match_pos = i + processed + match_offset;
 
             /* Copy bytes before this match */
