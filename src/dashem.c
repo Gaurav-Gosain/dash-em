@@ -105,36 +105,32 @@ static int dashem_remove_scalar(
     const unsigned char *in_ptr = (const unsigned char *)input;
     unsigned char *out_ptr = (unsigned char *)output;
 
-    /* Process input with unrolled loops to reduce branch overhead */
+    /* Process input with SWAR (SIMD Within A Register) optimization */
     size_t i = 0;
 
-    /* Fast path: process 8 bytes at a time when no matches */
+    /* Fast path: process 8 bytes at a time when no matches using SWAR technique */
     while (i + 8 <= input_len) {
-        /* Check if any byte could be the start of em-dash (0xE2) */
+        /* Check if any byte is 0xE2 using SWAR bit manipulation */
         uint64_t chunk = *(uint64_t *)(input + i);
-        int has_e2 = 0;
 
-        for (int j = 0; j < 8; j++) {
-            if (((chunk >> (j * 8)) & 0xFF) == 0xE2) {
-                has_e2 = 1;
-                break;
-            }
-        }
+        /* SWAR technique: check for 0xE2 in any of 8 bytes in parallel */
+        uint64_t test = chunk ^ 0xE2E2E2E2E2E2E2E2ULL;
+        uint64_t has_zero = (test - 0x0101010101010101ULL) & ~test & 0x8080808080808080ULL;
 
-        if (!has_e2) {
-            /* No em-dash pattern start in this chunk, copy directly */
+        if (has_zero == 0) {
+            /* No 0xE2 bytes in this chunk, copy directly */
             memcpy(out_ptr + out_idx, input + i, 8);
             out_idx += 8;
             i += 8;
         } else {
-            /* Process byte-by-byte */
+            /* Has potential em-dash start, process byte-by-byte */
             break;
         }
     }
 
     /* Process remaining bytes */
     while (i < input_len) {
-        if (i + 2 < input_len &&
+        if (i + 3 <= input_len &&
             in_ptr[i] == 0xE2 &&
             in_ptr[i + 1] == 0x80 &&
             in_ptr[i + 2] == 0x94) {
@@ -172,55 +168,74 @@ static int dashem_remove_avx2(
     const unsigned char *in_ptr = (const unsigned char *)input;
     unsigned char *out_ptr = (unsigned char *)output;
 
-    /* SSSE3 pshufb-based pattern matching for em-dash detection */
-    /* Pattern: 0xE2 0x80 0x94 */
-
-    /* Create lookup pattern for SSSE3 shuffle */
+    /* Create patterns for all 3 bytes of em-dash */
     const __m256i pattern_0xe2 = _mm256_set1_epi8(0xE2);
+    const __m256i pattern_0x80 = _mm256_set1_epi8(0x80);
+    const __m256i pattern_0x94 = _mm256_set1_epi8(0x94);
 
-    /* Process 32 bytes at a time */
+    /* Process 32 bytes at a time with SIMD */
     while (i + 32 <= input_len) {
-        __m256i v = _mm256_loadu_si256((__m256i *)(input + i));
-        __m256i cmp = _mm256_cmpeq_epi8(v, pattern_0xe2);
-        uint32_t mask = _mm256_movemask_epi8(cmp);
+        __m256i v0 = _mm256_loadu_si256((__m256i *)(input + i));
 
-        /* Fast path: no 0xE2 bytes found, copy entire chunk */
-        if (mask == 0) {
+        /* Load next two bytes for verification (handle boundaries) */
+        __m256i v1 = (i + 1 < input_len) ? _mm256_loadu_si256((__m256i *)(input + i + 1)) : _mm256_setzero_si256();
+        __m256i v2 = (i + 2 < input_len) ? _mm256_loadu_si256((__m256i *)(input + i + 2)) : _mm256_setzero_si256();
+
+        /* Check all 3 bytes in parallel */
+        __m256i cmp0 = _mm256_cmpeq_epi8(v0, pattern_0xe2);
+        __m256i cmp1 = _mm256_cmpeq_epi8(v1, pattern_0x80);
+        __m256i cmp2 = _mm256_cmpeq_epi8(v2, pattern_0x94);
+
+        /* All 3 must match for a complete em-dash pattern */
+        __m256i full_match = _mm256_and_si256(cmp0, _mm256_and_si256(cmp1, cmp2));
+        uint32_t em_dash_mask = _mm256_movemask_epi8(full_match);
+
+        /* Fast path: no em-dashes in this chunk */
+        if (em_dash_mask == 0) {
             memcpy(out_ptr + out_idx, input + i, 32);
             out_idx += 32;
             i += 32;
             continue;
         }
 
-        /* Process each potential position */
-        for (int j = 0; j < 32; j++) {
-            if ((mask & (1 << j)) && i + j + 2 < input_len) {
-                if (in_ptr[i + j] == 0xE2 && in_ptr[i + j + 1] == 0x80 && in_ptr[i + j + 2] == 0x94) {
-                    /* Copy up to this point */
-                    if (j > 0) {
-                        memcpy(out_ptr + out_idx, input + i, j);
-                        out_idx += j;
-                    }
-                    i += j + 3; /* Skip em-dash */
-                    j = 32; /* Break inner loop */
-                }
+        /* Process all potential em-dashes in this chunk */
+        size_t write_pos = i;  /* Track position we're copying from */
+        size_t processed = 0;  /* Track how many bits we've processed in the mask */
+
+        while (em_dash_mask != 0) {
+            /* Find the next set bit position within remaining mask */
+            int match_offset = __builtin_ctz(em_dash_mask);  /* Position in remaining mask */
+            size_t match_pos = i + processed + match_offset;
+
+            /* Copy bytes before this match */
+            if (match_pos > write_pos) {
+                size_t copy_len = match_pos - write_pos;
+                memcpy(out_ptr + out_idx, input + write_pos, copy_len);
+                out_idx += copy_len;
             }
+
+            /* Move past the em-dash (3 bytes) */
+            write_pos = match_pos + 3;
+            processed += match_offset + 3;
+
+            /* Remove processed bits from mask and continue */
+            em_dash_mask >>= (match_offset + 3);
         }
 
-        if (i < 32 + (i & ~31)) {
-            /* Copy remaining bytes from this chunk */
-            size_t remaining = 32 - (i & 31);
-            if (remaining > 0) {
-                memcpy(out_ptr + out_idx, input + (i & ~31), remaining);
-                out_idx += remaining;
-            }
-            i = (i & ~31) + 32;
+        /* Copy any remaining bytes from this chunk */
+        size_t chunk_end = i + 32;
+        if (write_pos < chunk_end) {
+            size_t remaining = chunk_end - write_pos;
+            memcpy(out_ptr + out_idx, input + write_pos, remaining);
+            out_idx += remaining;
         }
+
+        i = chunk_end;
     }
 
     /* Process remainder with scalar */
     while (i < input_len) {
-        if (i + 2 < input_len &&
+        if (i + 3 <= input_len &&
             in_ptr[i] == 0xE2 &&
             in_ptr[i + 1] == 0x80 &&
             in_ptr[i + 2] == 0x94) {
@@ -258,49 +273,72 @@ static int dashem_remove_sse42(
     const unsigned char *in_ptr = (const unsigned char *)input;
     unsigned char *out_ptr = (unsigned char *)output;
 
+    /* Create patterns for all 3 bytes of em-dash */
     const __m128i pattern_0xe2 = _mm_set1_epi8(0xE2);
+    const __m128i pattern_0x80 = _mm_set1_epi8(0x80);
+    const __m128i pattern_0x94 = _mm_set1_epi8(0x94);
 
     /* Process 16 bytes at a time */
     while (i + 16 <= input_len) {
-        __m128i v = _mm_loadu_si128((__m128i *)(input + i));
-        __m128i cmp = _mm_cmpeq_epi8(v, pattern_0xe2);
-        uint32_t mask = _mm_movemask_epi8(cmp);
+        __m128i v0 = _mm_loadu_si128((__m128i *)(input + i));
+        __m128i v1 = (i + 1 < input_len) ? _mm_loadu_si128((__m128i *)(input + i + 1)) : _mm_setzero_si128();
+        __m128i v2 = (i + 2 < input_len) ? _mm_loadu_si128((__m128i *)(input + i + 2)) : _mm_setzero_si128();
 
-        if (mask == 0) {
-            /* No 0xE2 bytes, copy chunk directly */
+        /* Check all 3 bytes in parallel */
+        __m128i cmp0 = _mm_cmpeq_epi8(v0, pattern_0xe2);
+        __m128i cmp1 = _mm_cmpeq_epi8(v1, pattern_0x80);
+        __m128i cmp2 = _mm_cmpeq_epi8(v2, pattern_0x94);
+
+        /* All 3 must match for a complete em-dash pattern */
+        __m128i full_match = _mm_and_si128(cmp0, _mm_and_si128(cmp1, cmp2));
+        uint32_t em_dash_mask = _mm_movemask_epi8(full_match);
+
+        /* Fast path: no em-dashes in this chunk */
+        if (em_dash_mask == 0) {
             memcpy(out_ptr + out_idx, input + i, 16);
             out_idx += 16;
             i += 16;
             continue;
         }
 
-        /* Check each potential match */
-        for (int j = 0; j < 16; j++) {
-            if ((mask & (1 << j)) && i + j + 2 < input_len) {
-                if (in_ptr[i + j] == 0xE2 && in_ptr[i + j + 1] == 0x80 && in_ptr[i + j + 2] == 0x94) {
-                    if (j > 0) {
-                        memcpy(out_ptr + out_idx, input + i, j);
-                        out_idx += j;
-                    }
-                    i += j + 3;
-                    j = 16; /* Break */
-                }
+        /* Process all potential em-dashes in this chunk */
+        size_t write_pos = i;  /* Track position we're copying from */
+        size_t processed = 0;  /* Track how many bits we've processed in the mask */
+
+        while (em_dash_mask != 0) {
+            /* Find the next set bit position within remaining mask */
+            int match_offset = __builtin_ctz(em_dash_mask);  /* Position in remaining mask */
+            size_t match_pos = i + processed + match_offset;
+
+            /* Copy bytes before this match */
+            if (match_pos > write_pos) {
+                size_t copy_len = match_pos - write_pos;
+                memcpy(out_ptr + out_idx, input + write_pos, copy_len);
+                out_idx += copy_len;
             }
+
+            /* Move past the em-dash (3 bytes) */
+            write_pos = match_pos + 3;
+            processed += match_offset + 3;
+
+            /* Remove processed bits from mask and continue */
+            em_dash_mask >>= (match_offset + 3);
         }
 
-        if (i < 16 + (i & ~15)) {
-            size_t remaining = 16 - (i & 15);
-            if (remaining > 0) {
-                memcpy(out_ptr + out_idx, input + (i & ~15), remaining);
-                out_idx += remaining;
-            }
-            i = (i & ~15) + 16;
+        /* Copy any remaining bytes from this chunk */
+        size_t chunk_end = i + 16;
+        if (write_pos < chunk_end) {
+            size_t remaining = chunk_end - write_pos;
+            memcpy(out_ptr + out_idx, input + write_pos, remaining);
+            out_idx += remaining;
         }
+
+        i = chunk_end;
     }
 
     /* Process remainder */
     while (i < input_len) {
-        if (i + 2 < input_len &&
+        if (i + 3 <= input_len &&
             in_ptr[i] == 0xE2 &&
             in_ptr[i + 1] == 0x80 &&
             in_ptr[i + 2] == 0x94) {
