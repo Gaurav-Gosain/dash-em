@@ -30,6 +30,9 @@
 #define ITERATIONS 1000
 #define EMDASH_UTF8 "\xe2\x80\x94"
 
+/* Adaptive iterations based on input size */
+#define GET_ITERATIONS(input_len) ((input_len) > 500000 ? 100 : ITERATIONS)
+
 /**
  * Generate test string with specified number of em-dashes
  */
@@ -169,9 +172,10 @@ static BenchResult benchmark_impl(
     size_t input_len
 ) {
     BenchResult result = {name, 0, 0};
+    int iterations = GET_ITERATIONS(input_len);
 
     double start = get_time_us();
-    for (int i = 0; i < ITERATIONS; i++) {
+    for (int i = 0; i < iterations; i++) {
         size_t out_len = 0;
         char* output = impl(input, input_len, &out_len);
         result.output_size = out_len;
@@ -179,15 +183,16 @@ static BenchResult benchmark_impl(
     }
     double end = get_time_us();
 
-    result.time_us = (end - start) / ITERATIONS;
+    result.time_us = (end - start) / iterations;
     return result;
 }
 
 static BenchResult benchmark_dashem(const char* input, size_t input_len) {
     BenchResult result = {"dash-em", 0, 0};
+    int iterations = GET_ITERATIONS(input_len);
 
     double start = get_time_us();
-    for (int i = 0; i < ITERATIONS; i++) {
+    for (int i = 0; i < iterations; i++) {
         char output_buf[1024 * 1024];
         size_t out_len = 0;
         dashem_remove(input, input_len, output_buf, sizeof(output_buf), &out_len);
@@ -195,7 +200,7 @@ static BenchResult benchmark_dashem(const char* input, size_t input_len) {
     }
     double end = get_time_us();
 
-    result.time_us = (end - start) / ITERATIONS;
+    result.time_us = (end - start) / iterations;
     return result;
 }
 
@@ -242,8 +247,18 @@ int main(void) {
         BenchResult naive = benchmark_impl("Naive Implementation", naive_remove, input, input_len);
         BenchResult dashem = benchmark_dashem(input, input_len);
 
-        printf("  %-28s: %12.2f µs (%10.3f ms)\n", naive.name, naive.time_us, naive.time_us / 1000);
-        printf("  %-28s: %12.2f µs (%10.3f ms)\n", dashem.name, dashem.time_us, dashem.time_us / 1000);
+        /* Format with adaptive precision for very small times */
+        if (naive.time_us < 0.01) {
+            printf("  %-28s: %12.6f µs (%10.6f ms)\n", naive.name, naive.time_us, naive.time_us / 1000);
+        } else {
+            printf("  %-28s: %12.2f µs (%10.3f ms)\n", naive.name, naive.time_us, naive.time_us / 1000);
+        }
+
+        if (dashem.time_us < 0.01) {
+            printf("  %-28s: %12.6f µs (%10.6f ms)\n", dashem.name, dashem.time_us, dashem.time_us / 1000);
+        } else {
+            printf("  %-28s: %12.2f µs (%10.3f ms)\n", dashem.name, dashem.time_us, dashem.time_us / 1000);
+        }
 
         double speedup = naive.time_us / dashem.time_us;
         double throughput_gb_s = ((double)input_len / (1024.0 * 1024.0 * 1024.0)) / (dashem.time_us / 1e6);
