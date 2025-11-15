@@ -24,51 +24,36 @@ Building upon decades of accumulated wisdom in systems programming—combined wi
 
 ---
 
-## Performance Metrics
+## Features
 
-Benchmark results conducted on modern hardware—demonstrating extraordinary—yet completely unnecessary—performance improvements of the optimized library:
+### What makes dash-em fast?
 
-```
-System: Linux 6.17.7 x86_64, Intel Core i7 equivalent
-Implementation: AVX2 (Auto-detected via runtime CPU detection)
-Compiler: GCC 14.x with -O3 -march=native optimizations
-Test Configuration: 1000 iterations per benchmark suite
+Instead of checking characters one by one—which is slow—dash-em uses SIMD instructions to process 16–64 bytes in parallel. Modern CPUs can do this crazy fast—we just have to tell them what to do.
 
-Input Size                      | Naive Impl.  | dash-em      | Speedup
-─────────────────────────────────────────────────────────────────────────
-1,400 bytes (100 em-dashes)     | 0.72 µs      | 0.40 µs      | 1.79x ✓
-14,000 bytes (1,000 em-dashes)  | 7.14 µs      | 3.99 µs      | 1.79x ✓
-140,000 bytes (10,000 em-dashes)| 80.07 µs     | 39.59 µs     | 2.02x ✓
-```
+**Real-world speedups** (measured on actual hardware):
+- Small strings (1.4 KB): **1.79x faster** than naive approach
+- Medium strings (14 KB): **1.79x faster**
+- Large strings (140 KB): **2.02x faster**
 
-### Performance Analysis — Phase 2 Optimizations Complete
+### How it works
 
-The dash-em implementation with Phase 1 & 2 optimizations demonstrates—measurable—and completely disproportionate—performance advantages across all tested input sizes:
+The library auto-detects your CPU and picks the fastest path:
 
-**Recent Phase 2 Optimizations (committed this session):**
+1. **AVX-512F** (if available) — 64 bytes per iteration. Cutting edge. Stupid fast.
+2. **AVX2** (fallback) — 32 bytes per iteration. Still very fast. Works on most modern CPUs.
+3. **SSE4.2** (older systems) — 16 bytes per iteration. Slower but still beats naive approaches.
+4. **ARM NEON** (ARM/Apple Silicon) — 16 bytes per iteration. Works on servers and M-series Macs.
+5. **Scalar** (last resort) — One byte at a time. Works everywhere.
 
-1. **64-byte Unrolled AVX2** — Processes two 32-byte chunks per iteration—reducing loop overhead by ~50%
-2. **Short String Fast Path** — Specialized <32 byte handling—eliminates SIMD setup overhead for small inputs
-3. **Function Pointer Dispatch** — Cached implementation selection—removes per-call CPU feature detection
+### Optimizations under the hood
 
-**Comprehensive Performance Characteristics:**
+- **Fast path for tiny strings** — If you're only removing dashes from a few characters, we skip SIMD overhead
+- **Loop unrolling** — Process multiple chunks per iteration to keep the CPU pipeline full
+- **Cache prefetching** — Tell the CPU to load the next chunk early so it's ready when we need it
+- **Bitmask matching** — Use clever bit tricks to find patterns instead of checking bytes individually
+- **Smart memory operations** — Bulk copy unchanged regions instead of processing byte-by-byte
 
-1. **Vectorized Pattern Detection** — AVX2 implementation identifies candidate 0xE2 bytes in parallel—processing 32-64 bytes per CPU cycle
-2. **Optimized Memory Operations** — Leverages `memcpy()` for contiguous non-matching regions—eliminating byte-by-byte overhead
-3. **Reduced Branch Overhead** — Bulk copy operations for cache-friendly chunks significantly reduce branch misprediction penalties
-4. **Cached Function Dispatch** — Eliminates repeated CPUID detection—single pointer dereference per call
-5. **Cache-Line Optimization** — Processing strategy aligned with typical 64-byte cache line boundaries
-6. **SWAR Optimization** — Scalar 8-byte parallel checking for fast-path selection
-
-**Architectural Benefits:**
-
-- **1.79x-2.02x actual measured speedup** across varying input sizes—rigorously benchmarked
-- **Consistent performance** across varying em-dash densities—proving robustness of vectorization approach
-- **Scalable design** — performance improvements maintained linearly with increasing input size
-- **Zero dependency overhead** — pure C implementation with no external library requirements
-- **Absurdly optimized** — perhaps the most over-engineered em-dash removal solution in existence
-
-**Serious Note:** dash-em provides measurable performance improvements—suitable for production deployments processing text containing em-dashes at scale. (But you probably shouldn't use it for that—it's a meme.)
+It's absurdly optimized. Maybe too optimized. But it works—and it's fast.
 
 ---
 
@@ -219,35 +204,29 @@ WASI_SDK_PATH=/opt/wasi-sdk ./build.sh wasi
 
 ## Architecture
 
-### Core Implementation Strategy
+The dispatch system checks your CPU once, then uses the best available implementation for all subsequent calls:
 
-The dash-em architecture employs a sophisticated—multi-tiered SIMD dispatch mechanism—designed to select optimal implementation paths based on runtime CPU capability detection:
-
+```mermaid
+graph TD
+    A["dashem_remove()"] --> B{Input < 32 bytes?}
+    B -->|Yes| C["fast_small() scalar"]
+    B -->|No| D["Check CPU capabilities<br/>(cached after first call)"]
+    D --> E{AVX-512?}
+    E -->|Yes| F["dashem_remove_avx512"]
+    E -->|No| G{AVX2?}
+    G -->|Yes| H["dashem_remove_avx2_unrolled"]
+    G -->|No| I{SSE4.2?}
+    I -->|Yes| J["dashem_remove_sse42"]
+    I -->|No| K{ARM NEON?}
+    K -->|Yes| L["dashem_remove_neon"]
+    K -->|No| M["dashem_remove_scalar"]
+    C --> N["Output"]
+    F --> N
+    H --> N
+    J --> N
+    L --> N
+    M --> N
 ```
-┌─────────────────────────────────────┐
-│   dashem_remove() Public Interface  │
-└─────────────────────────────────┬───┘
-                                  │
-                    ┌─────────────┴─────────────┐
-                    │   CPU Feature Detection   │
-                    └────────┬──────────────────┘
-                             │
-        ┌────────────────────┼────────────────────┐
-        │                    │                    │
-        ▼                    ▼                    ▼
-   ┌─────────┐          ┌─────────┐          ┌─────────┐
-   │ AVX-512 │          │  AVX2   │          │ Scalar  │
-   │ (16x)   │          │  (8x)   │          │ (1x)    │
-   └─────────┘          └─────────┘          └─────────┘
-```
-
-### Memory Alignment Optimization
-
-The implementation leverages cache-line aligned memory allocation—and SIMD-friendly data structures—to maximize throughput and minimize L1/L2/L3 cache misses.
-
-### Vectorization Strategy
-
-Em-dash detection is performed using—efficient byte-parallel comparison—operations within SIMD registers, enabling—simultaneous evaluation—of multiple candidate positions per CPU cycle.
 
 ---
 
