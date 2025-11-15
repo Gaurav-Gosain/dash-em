@@ -25,12 +25,12 @@ jobs:
             cxx: cl
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Set up CMake
         uses: jwlawson/actions-setup-cmake@v1
         with:
-          cmake-version: '3.24.x'
+          cmake-version: '3.30.x'
 
       - name: Create build directory
         run: mkdir build
@@ -47,20 +47,85 @@ jobs:
         run: ctest --verbose -C Release
         working-directory: build
 
-  # Node.js bindings temporarily disabled due to N-API build issues
-  # Re-enable after fixing binding.gyp configuration
-  # build-node:
-  #   name: Build Node.js Binding
+  build-node:
+    name: Build Node.js Binding
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node-version: ['18.x', '20.x', '24.x']
 
-  # Python bindings temporarily disabled due to native extension build issues
-  # Re-enable after fixing setup.py and environment setup
-  # build-python:
-  #   name: Build Python Package
+    steps:
+      - uses: actions/checkout@v4
 
-  # Rust bindings temporarily disabled due to build environment issues
-  # Will be re-enabled after fixing Cargo.toml and build configuration
-  # build-rust:
-  #   name: Build Rust Package
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Install dependencies
+        run: npm install
+        working-directory: bindings/node
+
+      - name: Build
+        run: npm run build
+        working-directory: bindings/node
+
+      - name: Run tests
+        run: npm test
+        working-directory: bindings/node
+
+  build-python:
+    name: Build Python Package
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ['3.10', '3.11', '3.12', '3.13']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install build dependencies
+        run: pip install build setuptools wheel
+
+      - name: Build
+        run: python -m build
+        working-directory: bindings/python
+
+      - name: Run tests
+        run: python test_dashem.py
+        working-directory: bindings/python
+
+  build-rust:
+    name: Build Rust Package
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build
+        run: cargo build --release
+        working-directory: bindings/rust
+
+      - name: Run tests
+        run: cargo test --release
+        working-directory: bindings/rust
+
+      - name: Run example
+        run: cargo run --release --example simple
+        working-directory: bindings/rust
 
   build-go:
     name: Build Go Package
@@ -68,13 +133,13 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        go-version: ['1.19', '1.20', '1.21']
+        go-version: ['1.23', '1.24', '1.25']
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v5
         with:
           go-version: ${{ matrix.go-version }}
 
@@ -92,13 +157,13 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        java-version: ['11', '17', '21']
+        java-version: ['17', '21']
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Set up JDK
-        uses: actions/setup-java@v3
+        uses: actions/setup-java@v4
         with:
           java-version: ${{ matrix.java-version }}
           distribution: 'temurin'
@@ -112,7 +177,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Run security checks
         uses: aquasecurity/trivy-action@master

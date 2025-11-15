@@ -20,10 +20,9 @@
   "license": "MIT",
   "gypfile": true,
   "devDependencies": {
-    "node-gyp": "^9.0.0",
-    "node-addon-api": "^7.0.0"
+    "node-gyp": "^12.0.0"
   },
   "engines": {
-    "node": ">=12.0.0"
+    "node": ">=18.0.0"
   }
 }

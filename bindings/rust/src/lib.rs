@@ -2,7 +2,17 @@
 //!
 //! This crate provides safe Rust bindings to the high-performance C library
 //! for removing em-dashes (U+2014) from UTF-8 encoded strings.
+//!
+//! # Examples
+//!
+//! ```
+//! use dash_em;
+//!
+//! let result = dash_em::remove("Hello—world").unwrap();
+//! assert_eq!(result, "Helloworld");
+//! ```
 
+#[link(name = "dashem", kind = "static")]
 unsafe extern "C" {
     fn dashem_remove(
         input: *const u8,

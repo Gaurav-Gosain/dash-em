@@ -28,7 +28,12 @@ static char* generate_test_string(size_t num_dashes, size_t* out_len) {
 
     size_t pos = 0;
     for (size_t i = 0; i < num_dashes; i++) {
-        pos += sprintf(str + pos, "Lorem ipsum—");
+        int written = snprintf(str + pos, total_len - pos, "Lorem ipsum—");
+        if (written < 0 || (size_t)written >= total_len - pos) {
+            /* Buffer overflow protection */
+            break;
+        }
+        pos += written;
     }
     str[pos] = '\0';
 
