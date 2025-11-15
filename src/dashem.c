@@ -145,6 +145,16 @@ static int dashem_remove_sse42(
 );
 #endif
 
+#if defined(__ARM_NEON)
+static int dashem_remove_neon(
+    const char *input,
+    size_t input_len,
+    char *output,
+    size_t output_capacity,
+    size_t *output_len
+);
+#endif
+
 uint32_t dashem_detect_cpu_features(void) {
     if (!g_features_detected) {
         g_cpu_features = __detect_cpu_features();
@@ -166,6 +176,12 @@ static dashem_remove_fn dashem_init_impl(void) {
 #if defined(__SSE4_2__)
     if (features & DASHEM_CPU_SSE42) {
         return dashem_remove_sse42;
+    }
+#endif
+
+#if defined(__ARM_NEON)
+    if (features & DASHEM_CPU_NEON) {
+        return dashem_remove_neon;
     }
 #endif
 
@@ -670,6 +686,104 @@ static int dashem_remove_sse42(
 #endif
 
 /* ============================================================================
+ * SIMD Implementation - ARM NEON (128-bit SIMD for ARM/ARM64)
+ * ============================================================================ */
+
+#if defined(__ARM_NEON)
+    #include <arm_neon.h>
+
+static int dashem_remove_neon(
+    const char *input,
+    size_t input_len,
+    char *output,
+    size_t output_capacity,
+    size_t *output_len
+) {
+    if (output_capacity < input_len) {
+        return -1;
+    }
+
+    size_t out_idx = 0;
+    size_t i = 0;
+    const unsigned char *in_ptr = (const unsigned char *)input;
+    unsigned char *out_ptr = (unsigned char *)output;
+
+    /* Create patterns for all 3 bytes of em-dash */
+    const uint8x16_t pattern_0xe2 = vdupq_n_u8(0xE2);
+    const uint8x16_t pattern_0x80 = vdupq_n_u8(0x80);
+    const uint8x16_t pattern_0x94 = vdupq_n_u8(0x94);
+
+    /* Process 16 bytes at a time with NEON */
+    while (i + 16 <= input_len) {
+        uint8x16_t v0 = vld1q_u8((const uint8_t *)(input + i));
+        uint8x16_t v1 = (i + 1 < input_len) ? vld1q_u8((const uint8_t *)(input + i + 1)) : vdupq_n_u8(0);
+        uint8x16_t v2 = (i + 2 < input_len) ? vld1q_u8((const uint8_t *)(input + i + 2)) : vdupq_n_u8(0);
+
+        /* Check all 3 bytes in parallel */
+        uint8x16_t cmp0 = vceqq_u8(v0, pattern_0xe2);
+        uint8x16_t cmp1 = vceqq_u8(v1, pattern_0x80);
+        uint8x16_t cmp2 = vceqq_u8(v2, pattern_0x94);
+
+        /* All 3 must match for a complete em-dash pattern */
+        uint8x16_t full_match = vandq_u8(cmp0, vandq_u8(cmp1, cmp2));
+
+        /* Convert to bitmask for checking */
+        uint64_t mask_low = vgetq_lane_u64(vreinterpretq_u64_u8(full_match), 0);
+        uint64_t mask_high = vgetq_lane_u64(vreinterpretq_u64_u8(full_match), 1);
+
+        /* Fast path: no em-dashes in this chunk */
+        if (mask_low == 0 && mask_high == 0) {
+            memcpy(out_ptr + out_idx, input + i, 16);
+            out_idx += 16;
+            i += 16;
+            continue;
+        }
+
+        /* Process matches byte by byte */
+        size_t write_pos = i;
+        for (int j = 0; j < 16; j++) {
+            if (((uint8_t *)full_match)[j] != 0) {
+                /* Found match at position j */
+                if (i + j > write_pos) {
+                    size_t copy_len = (i + j) - write_pos;
+                    memcpy(out_ptr + out_idx, input + write_pos, copy_len);
+                    out_idx += copy_len;
+                }
+                /* Skip em-dash (3 bytes) */
+                write_pos = i + j + 3;
+                j += 2;  /* Skip next 2 iterations */
+            }
+        }
+
+        /* Copy any remaining bytes from this chunk */
+        size_t chunk_end = i + 16;
+        if (write_pos < chunk_end) {
+            size_t remaining = chunk_end - write_pos;
+            memcpy(out_ptr + out_idx, input + write_pos, remaining);
+            out_idx += remaining;
+        }
+
+        i = chunk_end;
+    }
+
+    /* Process remainder with scalar */
+    while (i < input_len) {
+        if (i + 3 <= input_len &&
+            in_ptr[i] == 0xE2 &&
+            in_ptr[i + 1] == 0x80 &&
+            in_ptr[i + 2] == 0x94) {
+            i += 3;
+        } else {
+            out_ptr[out_idx++] = in_ptr[i++];
+        }
+    }
+
+    *output_len = out_idx;
+    return 0;
+}
+#endif
+
+/* ============================================================================
  * Public API Implementation
  * ============================================================================ */
 
@@ -713,6 +827,12 @@ const char* dashem_implementation_name(void) {
 #if defined(__SSE4_2__)
     if (features & DASHEM_CPU_SSE42) {
         return "SSE4.2";
+    }
+#endif
+
+#if defined(__ARM_NEON)
+    if (features & DASHEM_CPU_NEON) {
+        return "NEON";
     }
 #endif
 
