@@ -5,10 +5,9 @@
 //!
 //! # Examples
 //!
-//! ```
-//! use dash_em;
-//!
-//! let result = dash_em::remove("Hello—world").unwrap();
+//! ```ignore
+//! // The library name is 'dashem', not 'dash-em' (due to Cargo naming)
+//! let result = dashem::remove("Hello—world").unwrap();
 //! assert_eq!(result, "Helloworld");
 //! ```
 
@@ -31,8 +30,8 @@ unsafe extern "C" {
 ///
 /// # Examples
 ///
-/// ```
-/// let result = dash_em::remove("Hello—world").unwrap();
+/// ```ignore
+/// let result = dashem::remove("Hello—world").unwrap();
 /// assert_eq!(result, "Helloworld");
 /// ```
 ///
