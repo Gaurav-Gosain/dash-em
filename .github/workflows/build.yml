@@ -98,6 +98,10 @@ jobs:
         run: python -m build
         working-directory: bindings/python
 
+      - name: Install wheel
+        run: pip install dist/*.whl
+        working-directory: bindings/python
+
       - name: Run tests
         run: python test_dashem.py
         working-directory: bindings/python
@@ -138,6 +142,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up CMake
+        uses: jwlawson/actions-setup-cmake@v1
+        with:
+          cmake-version: '3.30.x'
+
+      - name: Build C library (required for Go tests)
+        run: |
+          mkdir -p build
+          cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release
+          cmake --build . --config Release
+        shell: bash
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
@@ -146,10 +163,15 @@ jobs:
       - name: Build
         run: go build -v
         working-directory: bindings/go
+        env:
+          CGO_LDFLAGS: -L../../build
 
       - name: Run tests
         run: go test -v ./...
         working-directory: bindings/go
+        env:
+          CGO_LDFLAGS: -L../../build
+          LD_LIBRARY_PATH: ../../build:$LD_LIBRARY_PATH
 
   build-java:
     name: Build Java Bindings
