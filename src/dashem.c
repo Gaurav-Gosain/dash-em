@@ -25,25 +25,38 @@
 #endif
 
 /* ============================================================================
+ * Compiler Attribute Macros
+ * ============================================================================ */
+
+/* Define UNUSED macro for suppressing unused function warnings */
+#if defined(_MSC_VER)
+    /* MSVC doesn't support __attribute__ */
+    #define DASHEM_UNUSED
+#else
+    /* GCC/Clang: use attribute to suppress unused warning */
+    #define DASHEM_UNUSED __attribute__((unused))
+#endif
+
+/* ============================================================================
  * Compile-Time Validation (Static Asserts)
  * ============================================================================ */
 
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
-    #include <assert.h>
-    /* C11 and later: use _Static_assert */
+    /* C11 and later: use _Static_assert (preferred) */
     #define DASHEM_STATIC_ASSERT(cond, msg) _Static_assert((cond), msg)
 #else
-    /* Pre-C11: use a compile-time trick with array sizes */
-    /* Use counter to avoid typedef redefinition warning */
-    #define DASHEM_CONCAT(a, b) a ## b
+    /* Pre-C11 fallback: compile-time assertion with unique names */
+    #define DASHEM_CONCAT_IMPL(a, b) a ## b
+    #define DASHEM_CONCAT(a, b) DASHEM_CONCAT_IMPL(a, b)
+
     #if defined(_MSC_VER)
         /* MSVC doesn't support __attribute__ */
         #define DASHEM_STATIC_ASSERT(cond, msg) \
-            typedef char DASHEM_CONCAT(dashem_static_assertion_, __LINE__)[(cond) ? 1 : -1]
+            typedef char DASHEM_CONCAT(dashem_sa_, __LINE__)[(cond) ? 1 : -1]
     #else
         /* GCC/Clang: use attribute to suppress unused warning */
         #define DASHEM_STATIC_ASSERT(cond, msg) \
-            typedef char DASHEM_CONCAT(dashem_static_assertion_, __LINE__)[(cond) ? 1 : -1] __attribute__((unused))
+            typedef char DASHEM_CONCAT(dashem_sa_, __LINE__)[(cond) ? 1 : -1] __attribute__((unused))
     #endif
 #endif
 
@@ -355,7 +368,7 @@ static inline int dashem_remove_fast_small(
     #include <immintrin.h>
 
 /* Note: This implementation is superseded by dashem_remove_avx2_unrolled */
-static __attribute__((unused)) int dashem_remove_avx2(
+static DASHEM_UNUSED int dashem_remove_avx2(
     const char *input,
     size_t input_len,
     char *output,
@@ -1063,7 +1076,7 @@ static inline int validate_utf8_char(const unsigned char *ptr, size_t remaining)
  *
  * Note: This function is currently unused but kept for future optimization.
  */
-static __attribute__((unused)) int process_utf8_char(
+static DASHEM_UNUSED int process_utf8_char(
     const unsigned char *input,
     size_t remaining,
     unsigned char *output,

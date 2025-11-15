@@ -15,6 +15,18 @@
 #endif
 #include "../src/dashem.h"
 
+/* Pragma compatibility for different compilers */
+#if defined(_MSC_VER)
+    #define PRAGMA_IGNORE_UNUSED_FUNCTION_START
+    #define PRAGMA_IGNORE_UNUSED_FUNCTION_END
+#else
+    #define PRAGMA_IGNORE_UNUSED_FUNCTION_START \
+        _Pragma("GCC diagnostic push") \
+        _Pragma("GCC diagnostic ignored \"-Wunused-function\"")
+    #define PRAGMA_IGNORE_UNUSED_FUNCTION_END \
+        _Pragma("GCC diagnostic pop")
+#endif
+
 #define ITERATIONS 1000
 #define EMDASH_UTF8 "\xe2\x80\x94"
 
@@ -43,7 +55,9 @@ static char* generate_test_string(size_t num_dashes, size_t* out_len) {
 
 /**
  * Generate test string with specified em-dash density percentage
+ * Note: Currently unused, but kept for potential future use in extended benchmarks
  */
+PRAGMA_IGNORE_UNUSED_FUNCTION_START
 static char* generate_test_with_density(size_t base_size, int density_percent, size_t* out_len) {
     char* str = (char*)malloc(base_size * 2);
     size_t pos = 0;
@@ -58,7 +72,7 @@ static char* generate_test_with_density(size_t base_size, int density_percent, s
         } else {
             /* Insert regular text */
             for (int j = 0; j < 10 && pos < base_size * 2; j++) {
-                str[pos++] = 'A' + (rand() % 26);
+                str[pos++] = (char)('A' + (rand() % 26));
             }
         }
     }
@@ -66,6 +80,7 @@ static char* generate_test_with_density(size_t base_size, int density_percent, s
     *out_len = pos;
     return str;
 }
+PRAGMA_IGNORE_UNUSED_FUNCTION_END
 
 /**
  * Generate test string with NO em-dashes (fast path test)
@@ -73,7 +88,7 @@ static char* generate_test_with_density(size_t base_size, int density_percent, s
 static char* generate_no_dashes(size_t size, size_t* out_len) {
     char* str = (char*)malloc(size);
     for (size_t i = 0; i < size - 1; i++) {
-        str[i] = 'A' + (i % 26);
+        str[i] = (char)('A' + (i % 26));
     }
     str[size - 1] = '\0';
     *out_len = size - 1;
@@ -193,15 +208,7 @@ int main(void) {
     srand(12345);  /* Deterministic random seed for reproducibility */
 
     /* Test configurations: various patterns and densities */
-    typedef struct {
-        char* (*generator)(size_t, size_t*);
-        size_t param;
-        const char* label;
-        const char* description;
-    } BenchConfig;
-
-    /* Test configurations simplified to use only base generators */
-    struct {
+    struct BenchConfig {
         char* (*generator)(size_t, size_t*);
         size_t param;
         const char* label;
@@ -239,7 +246,7 @@ int main(void) {
         printf("  %-28s: %12.2f µs (%10.3f ms)\n", dashem.name, dashem.time_us, dashem.time_us / 1000);
 
         double speedup = naive.time_us / dashem.time_us;
-        double throughput_gb_s = (input_len / (1024.0 * 1024.0 * 1024.0)) / (dashem.time_us / 1e6);
+        double throughput_gb_s = ((double)input_len / (1024.0 * 1024.0 * 1024.0)) / (dashem.time_us / 1e6);
         printf("  %-28s: %12.2fx speedup\n", "Speedup", speedup);
         printf("  %-28s: %12.2f GB/s\n", "Throughput", throughput_gb_s);
         printf("\n");
