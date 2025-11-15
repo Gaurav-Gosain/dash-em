@@ -466,8 +466,15 @@ static int dashem_remove_avx2(
             write_pos = match_pos + 3;
             processed += match_offset + 3;
 
-            /* Remove processed bits from mask and continue */
-            em_dash_mask >>= (match_offset + 3);
+            /* Remove processed bits from mask and continue.
+             * CRITICAL: Avoid undefined behavior when shift >= 32.
+             * Shifting a uint32_t by 32 or more bits is undefined in C. */
+            int shift_amount = match_offset + 3;
+            if (shift_amount >= 32) {
+                em_dash_mask = 0;  /* No more bits to process in this 32-byte chunk */
+            } else {
+                em_dash_mask >>= shift_amount;
+            }
         }
 
         /* Copy any remaining bytes from this chunk.
@@ -933,8 +940,15 @@ static int dashem_remove_sse42(
             write_pos = match_pos + 3;
             processed += match_offset + 3;
 
-            /* Remove processed bits from mask and continue */
-            em_dash_mask >>= (match_offset + 3);
+            /* Remove processed bits from mask and continue.
+             * CRITICAL: Avoid undefined behavior when shift >= 32.
+             * Shifting a uint32_t by 32 or more bits is undefined in C. */
+            int shift_amount = match_offset + 3;
+            if (shift_amount >= 32) {
+                em_dash_mask = 0;  /* No more bits to process in this 32-byte chunk */
+            } else {
+                em_dash_mask >>= shift_amount;
+            }
         }
 
         /* Copy any remaining bytes from this chunk */
