@@ -99,6 +99,7 @@ jobs:
         working-directory: bindings/python
 
       - name: Install wheel
+        shell: bash
         run: pip install dist/*.whl
         working-directory: bindings/python
 
