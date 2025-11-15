@@ -174,6 +174,45 @@ static int dashem_remove_scalar(
 }
 
 /* ============================================================================
+ * Fast Path for Small Strings (< 32 bytes)
+ * ============================================================================ */
+
+/* Specialized fast path for small inputs that avoids SIMD overhead */
+static inline int dashem_remove_fast_small(
+    const char *input,
+    size_t input_len,
+    char *output,
+    size_t output_capacity,
+    size_t *output_len
+) {
+    if (output_capacity < input_len) {
+        return -1;
+    }
+
+    size_t out_idx = 0;
+    size_t i = 0;
+    const unsigned char *in_ptr = (const unsigned char *)input;
+    unsigned char *out_ptr = (unsigned char *)output;
+
+    /* For small strings, direct byte-by-byte processing with aggressive inlining */
+    while (i < input_len) {
+        if (i + 3 <= input_len &&
+            in_ptr[i] == 0xE2 &&
+            in_ptr[i + 1] == 0x80 &&
+            in_ptr[i + 2] == 0x94) {
+            /* Skip em-dash (3 bytes) */
+            i += 3;
+        } else {
+            /* Copy single byte */
+            out_ptr[out_idx++] = in_ptr[i++];
+        }
+    }
+
+    *output_len = out_idx;
+    return 0;
+}
+
+/* ============================================================================
  * SIMD Implementation - AVX2
  * ============================================================================ */
 
@@ -579,6 +618,11 @@ int dashem_remove(
 ) {
     if (!input || !output || !output_len) {
         return -2;
+    }
+
+    /* Fast path for small inputs (< 32 bytes) - avoids SIMD overhead */
+    if (input_len < 32) {
+        return dashem_remove_fast_small(input, input_len, output, output_capacity, output_len);
     }
 
     /* Detect CPU features if not already done */
