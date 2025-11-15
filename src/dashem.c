@@ -276,6 +276,191 @@ static int dashem_remove_avx2(
     *output_len = out_idx;
     return 0;
 }
+
+/* 64-byte unrolled AVX2 variant for improved instruction-level parallelism */
+static int dashem_remove_avx2_unrolled(
+    const char *input,
+    size_t input_len,
+    char *output,
+    size_t output_capacity,
+    size_t *output_len
+) {
+    if (output_capacity < input_len) {
+        return -1;
+    }
+
+    size_t out_idx = 0;
+    size_t i = 0;
+    const unsigned char *in_ptr = (const unsigned char *)input;
+    unsigned char *out_ptr = (unsigned char *)output;
+
+    /* Create patterns for all 3 bytes of em-dash */
+    const __m256i pattern_0xe2 = _mm256_set1_epi8(0xE2);
+    const __m256i pattern_0x80 = _mm256_set1_epi8(0x80);
+    const __m256i pattern_0x94 = _mm256_set1_epi8(0x94);
+
+    /* Process 64 bytes at a time (two 32-byte chunks) with unrolled loop */
+    while (i + 64 <= input_len) {
+        /* First 32-byte chunk */
+        __m256i v0_a = _mm256_loadu_si256((__m256i *)(input + i));
+        __m256i v1_a = _mm256_loadu_si256((__m256i *)(input + i + 1));
+        __m256i v2_a = _mm256_loadu_si256((__m256i *)(input + i + 2));
+
+        /* Second 32-byte chunk */
+        __m256i v0_b = _mm256_loadu_si256((__m256i *)(input + i + 32));
+        __m256i v1_b = _mm256_loadu_si256((__m256i *)(input + i + 33));
+        __m256i v2_b = _mm256_loadu_si256((__m256i *)(input + i + 34));
+
+        /* Compare first chunk */
+        __m256i cmp0_a = _mm256_cmpeq_epi8(v0_a, pattern_0xe2);
+        __m256i cmp1_a = _mm256_cmpeq_epi8(v1_a, pattern_0x80);
+        __m256i cmp2_a = _mm256_cmpeq_epi8(v2_a, pattern_0x94);
+        __m256i full_match_a = _mm256_and_si256(cmp0_a, _mm256_and_si256(cmp1_a, cmp2_a));
+        uint32_t mask_a = _mm256_movemask_epi8(full_match_a);
+
+        /* Compare second chunk */
+        __m256i cmp0_b = _mm256_cmpeq_epi8(v0_b, pattern_0xe2);
+        __m256i cmp1_b = _mm256_cmpeq_epi8(v1_b, pattern_0x80);
+        __m256i cmp2_b = _mm256_cmpeq_epi8(v2_b, pattern_0x94);
+        __m256i full_match_b = _mm256_and_si256(cmp0_b, _mm256_and_si256(cmp1_b, cmp2_b));
+        uint32_t mask_b = _mm256_movemask_epi8(full_match_b);
+
+        /* Fast path: no em-dashes in either chunk */
+        if (mask_a == 0 && mask_b == 0) {
+            memcpy(out_ptr + out_idx, input + i, 64);
+            out_idx += 64;
+            i += 64;
+            continue;
+        }
+
+        /* Process first chunk if it has matches */
+        size_t write_pos = i;
+        if (mask_a != 0) {
+            size_t processed = 0;
+            while (mask_a != 0) {
+                int match_offset = dashem_ctz(mask_a);
+                size_t match_pos = i + processed + match_offset;
+
+                if (match_pos > write_pos) {
+                    size_t copy_len = match_pos - write_pos;
+                    memcpy(out_ptr + out_idx, input + write_pos, copy_len);
+                    out_idx += copy_len;
+                }
+
+                write_pos = match_pos + 3;
+                processed += match_offset + 3;
+                mask_a >>= (match_offset + 3);
+            }
+
+            size_t chunk_end = i + 32;
+            if (write_pos < chunk_end) {
+                size_t remaining = chunk_end - write_pos;
+                memcpy(out_ptr + out_idx, input + write_pos, remaining);
+                out_idx += remaining;
+            }
+            write_pos = i + 32;
+        }
+
+        /* Process second chunk if it has matches */
+        if (mask_b != 0) {
+            size_t processed = 0;
+            while (mask_b != 0) {
+                int match_offset = dashem_ctz(mask_b);
+                size_t match_pos = i + 32 + processed + match_offset;
+
+                if (match_pos > write_pos) {
+                    size_t copy_len = match_pos - write_pos;
+                    memcpy(out_ptr + out_idx, input + write_pos, copy_len);
+                    out_idx += copy_len;
+                }
+
+                write_pos = match_pos + 3;
+                processed += match_offset + 3;
+                mask_b >>= (match_offset + 3);
+            }
+
+            size_t chunk_end = i + 64;
+            if (write_pos < chunk_end) {
+                size_t remaining = chunk_end - write_pos;
+                memcpy(out_ptr + out_idx, input + write_pos, remaining);
+                out_idx += remaining;
+            }
+        } else {
+            /* No matches in second chunk, copy remaining bytes */
+            size_t chunk_end = i + 64;
+            if (write_pos < chunk_end) {
+                size_t remaining = chunk_end - write_pos;
+                memcpy(out_ptr + out_idx, input + write_pos, remaining);
+                out_idx += remaining;
+            }
+        }
+
+        i += 64;
+    }
+
+    /* Process remaining bytes with single 32-byte chunks */
+    while (i + 32 <= input_len) {
+        __m256i v0 = _mm256_loadu_si256((__m256i *)(input + i));
+        __m256i v1 = _mm256_loadu_si256((__m256i *)(input + i + 1));
+        __m256i v2 = _mm256_loadu_si256((__m256i *)(input + i + 2));
+
+        __m256i cmp0 = _mm256_cmpeq_epi8(v0, pattern_0xe2);
+        __m256i cmp1 = _mm256_cmpeq_epi8(v1, pattern_0x80);
+        __m256i cmp2 = _mm256_cmpeq_epi8(v2, pattern_0x94);
+
+        __m256i full_match = _mm256_and_si256(cmp0, _mm256_and_si256(cmp1, cmp2));
+        uint32_t em_dash_mask = _mm256_movemask_epi8(full_match);
+
+        if (em_dash_mask == 0) {
+            memcpy(out_ptr + out_idx, input + i, 32);
+            out_idx += 32;
+            i += 32;
+            continue;
+        }
+
+        size_t write_pos = i;
+        size_t processed = 0;
+
+        while (em_dash_mask != 0) {
+            int match_offset = dashem_ctz(em_dash_mask);
+            size_t match_pos = i + processed + match_offset;
+
+            if (match_pos > write_pos) {
+                size_t copy_len = match_pos - write_pos;
+                memcpy(out_ptr + out_idx, input + write_pos, copy_len);
+                out_idx += copy_len;
+            }
+
+            write_pos = match_pos + 3;
+            processed += match_offset + 3;
+            em_dash_mask >>= (match_offset + 3);
+        }
+
+        size_t chunk_end = i + 32;
+        if (write_pos < chunk_end) {
+            size_t remaining = chunk_end - write_pos;
+            memcpy(out_ptr + out_idx, input + write_pos, remaining);
+            out_idx += remaining;
+        }
+
+        i = chunk_end;
+    }
+
+    /* Process remainder with scalar */
+    while (i < input_len) {
+        if (i + 3 <= input_len &&
+            in_ptr[i] == 0xE2 &&
+            in_ptr[i + 1] == 0x80 &&
+            in_ptr[i + 2] == 0x94) {
+            i += 3;
+        } else {
+            out_ptr[out_idx++] = in_ptr[i++];
+        }
+    }
+
+    *output_len = out_idx;
+    return 0;
+}
 #endif
 
 /* ============================================================================
@@ -402,7 +587,12 @@ int dashem_remove(
     /* Dispatch to optimal implementation */
 #if defined(__AVX2__)
     if (features & DASHEM_CPU_AVX2) {
-        return dashem_remove_avx2(input, input_len, output, output_capacity, output_len);
+        /* Use unrolled version for larger inputs, regular version for smaller */
+        if (input_len >= 64) {
+            return dashem_remove_avx2_unrolled(input, input_len, output, output_capacity, output_len);
+        } else {
+            return dashem_remove_avx2(input, input_len, output, output_capacity, output_len);
+        }
     }
 #endif
 
