@@ -44,7 +44,7 @@ jobs:
         working-directory: build
 
       - name: Run Tests
-        run: ctest --verbose
+        run: ctest --verbose -C Release
         working-directory: build
 
   # Node.js bindings temporarily disabled due to N-API build issues
