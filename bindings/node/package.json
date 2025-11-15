@@ -19,6 +19,14 @@
   "author": "Gaurav Gosain",
   "license": "MIT",
   "gypfile": true,
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "binding.gyp",
+    "src",
+    "test.js",
+    "shell.nix"
+  ],
   "devDependencies": {
     "node-gyp": "^12.0.0"
   },
