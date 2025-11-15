@@ -684,7 +684,12 @@ static int dashem_remove_avx2_unrolled(
 
             write_pos = match_pos + 3;
             processed += match_offset + 3;
-            em_dash_mask >>= (match_offset + 3);
+            int shift_amount = match_offset + 3;
+            if (shift_amount >= 32) {
+                em_dash_mask = 0;
+            } else {
+            em_dash_mask >>= shift_amount;
+            }
         }
 
         size_t chunk_end = i + 32;
@@ -835,7 +840,12 @@ static int dashem_remove_avx512(
 
             write_pos = match_pos + 3;
             processed += match_offset + 3;
-            em_dash_mask >>= (match_offset + 3);
+            int shift_amount = match_offset + 3;
+            if (shift_amount >= 32) {
+                em_dash_mask = 0;
+            } else {
+            em_dash_mask >>= shift_amount;
+            }
         }
 
         size_t chunk_end = i + 32;

@@ -140,7 +140,7 @@ static int verify_against_reference(const char* actual, size_t actual_len,
         fprintf(stderr, "  Input size: %zu bytes (type %d)\n", input_len, fuzz_type);
         fprintf(stderr, "  Expected: %zu bytes\n", expected_len);
         fprintf(stderr, "  Got:      %zu bytes\n", actual_len);
-        fprintf(stderr, "  Difference: %zd bytes\n", (ssize_t)actual_len - (ssize_t)expected_len);
+        fprintf(stderr, "  Difference: %lld bytes\n", (long long)actual_len - (long long)expected_len);
         return 0;
     }
 
