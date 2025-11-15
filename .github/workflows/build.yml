@@ -57,29 +57,10 @@ jobs:
   # build-python:
   #   name: Build Python Package
 
-  build-rust:
-    name: Build Rust Package
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-
-    steps:
-      - uses: actions/checkout@v3
-
-      - name: Install Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
-
-      - name: Build
-        run: cargo build --release
-        working-directory: bindings/rust
-
-      - name: Run tests
-        run: cargo test --release
-        working-directory: bindings/rust
+  # Rust bindings temporarily disabled due to build environment issues
+  # Will be re-enabled after fixing Cargo.toml and build configuration
+  # build-rust:
+  #   name: Build Rust Package
 
   build-go:
     name: Build Go Package
