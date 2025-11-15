@@ -638,16 +638,13 @@ static int dashem_remove_avx512(
         __m512i v1 = _mm512_loadu_si512((__m512i *)(input + i + 1));
         __m512i v2 = _mm512_loadu_si512((__m512i *)(input + i + 2));
 
-        /* Compare each byte position */
-        __m512i cmp0 = _mm512_cmpeq_epi8(v0, pattern_0xe2);
-        __m512i cmp1 = _mm512_cmpeq_epi8(v1, pattern_0x80);
-        __m512i cmp2 = _mm512_cmpeq_epi8(v2, pattern_0x94);
+        /* Compare each byte position using masks (AVX-512F style) */
+        __mmask64 cmp0 = _mm512_cmpeq_epu8_mask(v0, pattern_0xe2);
+        __mmask64 cmp1 = _mm512_cmpeq_epu8_mask(v1, pattern_0x80);
+        __mmask64 cmp2 = _mm512_cmpeq_epu8_mask(v2, pattern_0x94);
 
         /* All 3 must match for a complete em-dash pattern */
-        __m512i full_match = _mm512_and_si512(cmp0, _mm512_and_si512(cmp1, cmp2));
-
-        /* Convert to bitmask for efficient checking */
-        uint64_t match_mask = _mm512_movepi8_mask(full_match);
+        uint64_t match_mask = cmp0 & cmp1 & cmp2;
 
         /* Fast path: no em-dashes in this chunk */
         if (match_mask == 0) {
