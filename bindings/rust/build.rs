@@ -5,24 +5,10 @@ fn main() {
 
     let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
 
-    // Try normal location first (when used from monorepo)
-    let dashem_src = manifest_dir
-        .parent()
-        .and_then(|p| p.parent())
-        .map(|p| p.join("src").join("dashem.c"));
-
-    // Fall back to src in manifest_dir if we're in a packaged tarball
-    let dashem_src = if let Some(ref p) = dashem_src {
-        if p.exists() {
-            p.clone()
-        } else {
-            manifest_dir.join("src").join("dashem.c")
-        }
-    } else {
-        manifest_dir.join("src").join("dashem.c")
-    };
-
-    let dashem_include = dashem_src.parent().expect("Failed to determine include directory").to_path_buf();
+    // C source files are bundled in src/ directory (copied during build)
+    // This works both in monorepo and packaged tarball scenarios
+    let dashem_src = manifest_dir.join("src").join("dashem.c");
+    let dashem_include = manifest_dir.join("src");
 
     println!("cargo:warning=Using dashem source: {:?}", dashem_src);
     println!("cargo:warning=Using dashem include: {:?}", dashem_include);
