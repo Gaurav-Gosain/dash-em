@@ -177,6 +177,12 @@ uint32_t dashem_detect_cpu_features(void) {
 static dashem_remove_fn dashem_init_impl(void) {
     uint32_t features = dashem_detect_cpu_features();
 
+#if defined(__AVX512F__)
+    if (features & DASHEM_CPU_AVX512F) {
+        return dashem_remove_avx512;
+    }
+#endif
+
 #if defined(__AVX2__)
     if (features & DASHEM_CPU_AVX2) {
         return dashem_remove_avx2_unrolled;
@@ -593,6 +599,160 @@ static int dashem_remove_avx2_unrolled(
 #endif
 
 /* ============================================================================
+ * SIMD Implementation - AVX-512F (64-byte unrolled vectorization)
+ * ============================================================================ */
+
+#if defined(__AVX512F__)
+    #include <immintrin.h>
+
+static int dashem_remove_avx512(
+    const char *input,
+    size_t input_len,
+    char *output,
+    size_t output_capacity,
+    size_t *output_len
+) {
+    if (output_capacity < input_len) {
+        return -1;
+    }
+
+    size_t out_idx = 0;
+    size_t i = 0;
+    const unsigned char *in_ptr = (const unsigned char *)input;
+    unsigned char *out_ptr = (unsigned char *)output;
+
+    /* Create patterns for all 3 bytes of em-dash */
+    const __m512i pattern_0xe2 = _mm512_set1_epi8((char)0xE2);
+    const __m512i pattern_0x80 = _mm512_set1_epi8((char)0x80);
+    const __m512i pattern_0x94 = _mm512_set1_epi8((char)0x94);
+
+    /* Process 64 bytes at a time (single 512-bit vector) with overlap for multi-byte patterns */
+    while (i + 64 <= input_len) {
+        /* Software prefetch for upcoming iterations */
+        if (i + 128 < input_len) {
+            _mm_prefetch(input + i + 128, _MM_HINT_T0);
+        }
+
+        /* Load three overlapping 64-byte chunks to match the 3-byte pattern */
+        __m512i v0 = _mm512_loadu_si512((__m512i *)(input + i));
+        __m512i v1 = _mm512_loadu_si512((__m512i *)(input + i + 1));
+        __m512i v2 = _mm512_loadu_si512((__m512i *)(input + i + 2));
+
+        /* Compare each byte position */
+        __m512i cmp0 = _mm512_cmpeq_epi8(v0, pattern_0xe2);
+        __m512i cmp1 = _mm512_cmpeq_epi8(v1, pattern_0x80);
+        __m512i cmp2 = _mm512_cmpeq_epi8(v2, pattern_0x94);
+
+        /* All 3 must match for a complete em-dash pattern */
+        __m512i full_match = _mm512_and_si512(cmp0, _mm512_and_si512(cmp1, cmp2));
+
+        /* Convert to bitmask for efficient checking */
+        uint64_t match_mask = _mm512_movepi8_mask(full_match);
+
+        /* Fast path: no em-dashes in this chunk */
+        if (match_mask == 0) {
+            memcpy(out_ptr + out_idx, input + i, 64);
+            out_idx += 64;
+            i += 64;
+            continue;
+        }
+
+        /* Process matches using CTZ-based iteration */
+        size_t write_pos = i;
+        size_t processed = 0;
+
+        while (match_mask != 0) {
+            int match_offset = dashem_ctz((uint32_t)match_mask);
+            size_t match_pos = i + processed + match_offset;
+
+            if (match_pos > write_pos) {
+                size_t copy_len = match_pos - write_pos;
+                memcpy(out_ptr + out_idx, input + write_pos, copy_len);
+                out_idx += copy_len;
+            }
+
+            write_pos = match_pos + 3;
+            processed += match_offset + 3;
+            match_mask >>= (match_offset + 3);
+        }
+
+        /* Copy any remaining bytes from this chunk */
+        size_t chunk_end = i + 64;
+        if (write_pos < chunk_end) {
+            size_t remaining = chunk_end - write_pos;
+            memcpy(out_ptr + out_idx, input + write_pos, remaining);
+            out_idx += remaining;
+        }
+
+        i += 64;
+    }
+
+    /* Process remaining bytes with 32-byte AVX2 fallback */
+    while (i + 32 <= input_len) {
+        __m256i v0 = _mm256_loadu_si256((__m256i *)(input + i));
+        __m256i v1 = _mm256_loadu_si256((__m256i *)(input + i + 1));
+        __m256i v2 = _mm256_loadu_si256((__m256i *)(input + i + 2));
+
+        __m256i cmp0 = _mm256_cmpeq_epi8(v0, _mm256_set1_epi8((char)0xE2));
+        __m256i cmp1 = _mm256_cmpeq_epi8(v1, _mm256_set1_epi8((char)0x80));
+        __m256i cmp2 = _mm256_cmpeq_epi8(v2, _mm256_set1_epi8((char)0x94));
+
+        __m256i full_match = _mm256_and_si256(cmp0, _mm256_and_si256(cmp1, cmp2));
+        uint32_t em_dash_mask = _mm256_movemask_epi8(full_match);
+
+        if (em_dash_mask == 0) {
+            memcpy(out_ptr + out_idx, input + i, 32);
+            out_idx += 32;
+            i += 32;
+            continue;
+        }
+
+        size_t write_pos = i;
+        size_t processed = 0;
+
+        while (em_dash_mask != 0) {
+            int match_offset = dashem_ctz(em_dash_mask);
+            size_t match_pos = i + processed + match_offset;
+
+            if (match_pos > write_pos) {
+                size_t copy_len = match_pos - write_pos;
+                memcpy(out_ptr + out_idx, input + write_pos, copy_len);
+                out_idx += copy_len;
+            }
+
+            write_pos = match_pos + 3;
+            processed += match_offset + 3;
+            em_dash_mask >>= (match_offset + 3);
+        }
+
+        size_t chunk_end = i + 32;
+        if (write_pos < chunk_end) {
+            size_t remaining = chunk_end - write_pos;
+            memcpy(out_ptr + out_idx, input + write_pos, remaining);
+            out_idx += remaining;
+        }
+
+        i = chunk_end;
+    }
+
+    /* Process remainder with scalar */
+    while (i < input_len) {
+        if (i + 3 <= input_len &&
+            in_ptr[i] == 0xE2 &&
+            in_ptr[i + 1] == 0x80 &&
+            in_ptr[i + 2] == 0x94) {
+            i += 3;
+        } else {
+            out_ptr[out_idx++] = in_ptr[i++];
+        }
+    }
+
+    *output_len = out_idx;
+    return 0;
+}
+#endif
+
+/* ============================================================================
  * SIMD Implementation - SSE4.2
  * ============================================================================ */
 
@@ -830,6 +990,12 @@ const char* dashem_version(void) {
 
 const char* dashem_implementation_name(void) {
     uint32_t features = dashem_detect_cpu_features();
+
+#if defined(__AVX512F__)
+    if (features & DASHEM_CPU_AVX512F) {
+        return "AVX-512F";
+    }
+#endif
 
 #if defined(__AVX2__)
     if (features & DASHEM_CPU_AVX2) {
