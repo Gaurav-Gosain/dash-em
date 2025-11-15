@@ -34,8 +34,17 @@
     #define DASHEM_STATIC_ASSERT(cond, msg) _Static_assert((cond), msg)
 #else
     /* Pre-C11: use a compile-time trick with array sizes */
-    #define DASHEM_STATIC_ASSERT(cond, msg) \
-        typedef char static_assertion[(cond) ? 1 : -1] __attribute__((unused))
+    /* Use counter to avoid typedef redefinition warning */
+    #define DASHEM_CONCAT(a, b) a ## b
+    #if defined(_MSC_VER)
+        /* MSVC doesn't support __attribute__ */
+        #define DASHEM_STATIC_ASSERT(cond, msg) \
+            typedef char DASHEM_CONCAT(dashem_static_assertion_, __LINE__)[(cond) ? 1 : -1]
+    #else
+        /* GCC/Clang: use attribute to suppress unused warning */
+        #define DASHEM_STATIC_ASSERT(cond, msg) \
+            typedef char DASHEM_CONCAT(dashem_static_assertion_, __LINE__)[(cond) ? 1 : -1] __attribute__((unused))
+    #endif
 #endif
 
 /* Validate em-dash pattern bytes at compile time */
@@ -363,9 +372,13 @@ static __attribute__((unused)) int dashem_remove_avx2(
     unsigned char *out_ptr = (unsigned char *)output;
 
     /* Create patterns for all 3 bytes of em-dash */
-    const __m256i pattern_0xe2 = _mm256_set1_epi8(0xE2);
-    const __m256i pattern_0x80 = _mm256_set1_epi8(0x80);
-    const __m256i pattern_0x94 = _mm256_set1_epi8(0x94);
+    /* Note: Using signed char patterns is intentional for SIMD operations */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Woverflow"
+    const __m256i pattern_0xe2 = _mm256_set1_epi8((char)0xE2);
+    const __m256i pattern_0x80 = _mm256_set1_epi8((char)0x80);
+    const __m256i pattern_0x94 = _mm256_set1_epi8((char)0x94);
+#pragma GCC diagnostic pop
 
     /* Process 32 bytes at a time with SIMD */
     while (i + 32 <= input_len) {
@@ -461,9 +474,13 @@ static int dashem_remove_avx2_unrolled(
     unsigned char *out_ptr = (unsigned char *)output;
 
     /* Create patterns for all 3 bytes of em-dash */
-    const __m256i pattern_0xe2 = _mm256_set1_epi8(0xE2);
-    const __m256i pattern_0x80 = _mm256_set1_epi8(0x80);
-    const __m256i pattern_0x94 = _mm256_set1_epi8(0x94);
+    /* Note: Using signed char patterns is intentional for SIMD operations */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Woverflow"
+    const __m256i pattern_0xe2 = _mm256_set1_epi8((char)0xE2);
+    const __m256i pattern_0x80 = _mm256_set1_epi8((char)0x80);
+    const __m256i pattern_0x94 = _mm256_set1_epi8((char)0x94);
+#pragma GCC diagnostic pop
 
     /* Process 64 bytes at a time (two 32-byte chunks) with unrolled loop */
     while (i + 64 <= input_len) {
@@ -810,9 +827,13 @@ static int dashem_remove_sse42(
     unsigned char *out_ptr = (unsigned char *)output;
 
     /* Create patterns for all 3 bytes of em-dash */
-    const __m128i pattern_0xe2 = _mm_set1_epi8(0xE2);
-    const __m128i pattern_0x80 = _mm_set1_epi8(0x80);
-    const __m128i pattern_0x94 = _mm_set1_epi8(0x94);
+    /* Note: Using signed char patterns is intentional for SIMD operations */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Woverflow"
+    const __m128i pattern_0xe2 = _mm_set1_epi8((char)0xE2);
+    const __m128i pattern_0x80 = _mm_set1_epi8((char)0x80);
+    const __m128i pattern_0x94 = _mm_set1_epi8((char)0x94);
+#pragma GCC diagnostic pop
 
     /* Process 16 bytes at a time */
     while (i + 16 <= input_len) {

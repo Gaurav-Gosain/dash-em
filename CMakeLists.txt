@@ -40,6 +40,20 @@ elseif(ENABLE_PGO AND PGO_USE)
     message(STATUS "PGO: Using profile data")
 endif()
 
+# ============================================================================
+# Memory Safety Option (Fil-C)
+# ============================================================================
+
+option(ENABLE_FILC "Compile with Fil-C for memory safety (if available)" OFF)
+
+if(ENABLE_FILC)
+    # Use Fil-C compiler instead of default C compiler
+    set(CMAKE_C_COMPILER filc CACHE STRING "C compiler" FORCE)
+    message(STATUS "Memory safety: Using Fil-C compiler")
+else()
+    message(STATUS "Memory safety: Disabled (using standard compiler)")
+endif()
+
 # Enable SIMD optimizations and aggressive optimization flags
 if(MSVC)
     # MSVC optimizations
@@ -47,6 +61,7 @@ if(MSVC)
     add_compile_options(/O2)  # Favor speed
     add_compile_options(/Oi)  # Intrinsic functions
     add_compile_options(/Ot)  # Favor fast code
+    add_compile_options(/W4)  # Warning level 4
 else()
     # GCC/Clang optimizations
     add_compile_options(-march=native)
@@ -56,9 +71,19 @@ else()
     add_compile_options(-finline-functions)  # Inline functions
     add_compile_options(-ffast-math)  # Fast floating-point math
     add_compile_options(-fomit-frame-pointer)  # Omit frame pointer
+    add_compile_options(-fno-exceptions)  # No C++ exceptions
 
-    # Add -fno-exceptions and -fno-rtti if using C only (not C++)
-    add_compile_options(-fno-exceptions)
+    # Pedantic warnings
+    add_compile_options(-Wall)      # All warnings
+    add_compile_options(-Wextra)    # Extra warnings
+    add_compile_options(-Wpedantic) # Pedantic warnings
+    add_compile_options(-Wstrict-prototypes)  # Strict prototypes
+    add_compile_options(-Wwrite-strings)      # Write-strings
+    add_compile_options(-Wshadow)             # Variable shadowing
+    add_compile_options(-Wconversion)         # Implicit conversions
+
+    # Disable specific warnings that conflict with intentional patterns
+    add_compile_options(-Wno-sign-conversion) # Allow signed/unsigned conversion
 endif()
 
 # Link-time optimization for GCC/Clang

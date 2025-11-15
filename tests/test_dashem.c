@@ -8,6 +8,9 @@
 #include <string.h>
 #include <assert.h>
 
+/* Suppress unused variable warnings in test code - assertions use the variables */
+#pragma GCC diagnostic ignored "-Wunused-variable"
+
 #define TEST_COUNT 0
 #define TEST_PASS(name) printf("✓ %s\n", name)
 #define TEST_FAIL(name) printf("✗ %s\n", name)
