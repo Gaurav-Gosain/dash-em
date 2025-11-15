@@ -135,6 +135,16 @@ static int dashem_remove_avx2_unrolled(
 );
 #endif
 
+#if defined(__AVX512F__)
+static int dashem_remove_avx512(
+    const char *input,
+    size_t input_len,
+    char *output,
+    size_t output_capacity,
+    size_t *output_len
+);
+#endif
+
 #if defined(__SSE4_2__)
 static int dashem_remove_sse42(
     const char *input,
@@ -739,10 +749,13 @@ static int dashem_remove_neon(
             continue;
         }
 
-        /* Process matches byte by byte using NEON lane extraction */
+        /* Process matches by storing match mask to memory */
+        uint8_t match_bytes[16];
+        vst1q_u8(match_bytes, full_match);
+
         size_t write_pos = i;
         for (int j = 0; j < 16; j++) {
-            if (vgetq_lane_u8(full_match, j) != 0) {
+            if (match_bytes[j] != 0) {
                 /* Found match at position j */
                 if (i + j > write_pos) {
                     size_t copy_len = (i + j) - write_pos;
