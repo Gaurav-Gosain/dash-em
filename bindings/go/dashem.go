@@ -8,7 +8,7 @@ package dashem
 
 /*
 #cgo CFLAGS: -O3 -I${SRCDIR}/../../src
-#cgo LDFLAGS: -L${SRCDIR}/../../build -ldashem
+#cgo LDFLAGS: -L${SRCDIR}/../../build -ldashem_static
 
 #include "dashem.h"
 #include <stdlib.h>

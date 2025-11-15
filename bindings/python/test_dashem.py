@@ -11,7 +11,7 @@ def test_version():
     """Test: Get version"""
     print("Test 1: Version")
     version = dashem.version()
-    print(f"✓ Version: {version}\n")
+    print(f"[PASS] Version: {version}\n")
     assert version, "Version should not be empty"
 
 
@@ -19,7 +19,7 @@ def test_implementation():
     """Test: Get implementation name"""
     print("Test 2: Implementation")
     impl = dashem.implementation_name()
-    print(f"✓ Implementation: {impl}\n")
+    print(f"[PASS] Implementation: {impl}\n")
     valid_impls = ("AVX2", "SSE4.2", "NEON", "scalar", "Scalar")
     assert impl in valid_impls, f"Unknown implementation: {impl}"
 
@@ -31,7 +31,7 @@ def test_single_em_dash():
     print(f'Input:  "Hello—world"')
     print(f'Output: "{result}"')
     assert result == "Helloworld", "Should remove em-dash"
-    print("✓ Pass\n")
+    print("[PASS] Pass\n")
 
 
 def test_multiple_em_dashes():
@@ -41,7 +41,7 @@ def test_multiple_em_dashes():
     print(f'Input:  "First—second—third—fourth"')
     print(f'Output: "{result}"')
     assert result == "Firstsecondthirdfourth", "Should remove all em-dashes"
-    print("✓ Pass\n")
+    print("[PASS] Pass\n")
 
 
 def test_no_em_dashes():
@@ -51,7 +51,7 @@ def test_no_em_dashes():
     print(f'Input:  "Hello, world!"')
     print(f'Output: "{result}"')
     assert result == "Hello, world!", "Should not modify string without em-dashes"
-    print("✓ Pass\n")
+    print("[PASS] Pass\n")
 
 
 def test_empty_string():
@@ -61,7 +61,7 @@ def test_empty_string():
     print(f'Input:  ""')
     print(f'Output: "{result}"')
     assert result == "", "Should handle empty string"
-    print("✓ Pass\n")
+    print("[PASS] Pass\n")
 
 
 def test_unicode_text():
@@ -71,7 +71,7 @@ def test_unicode_text():
     print(f'Input:  "Hello—世界—мир"')
     print(f'Output: "{result}"')
     assert result == "Hello世界мир", "Should remove em-dashes while preserving other Unicode"
-    print("✓ Pass\n")
+    print("[PASS] Pass\n")
 
 
 def test_type_error():
@@ -81,14 +81,14 @@ def test_type_error():
         dashem.remove(123)
         assert False, "Should raise TypeError for non-string input"
     except TypeError as e:
-        print(f"✓ Correctly raised TypeError: {e}\n")
+        print(f"[PASS] Correctly raised TypeError: {e}\n")
 
 
 def test_cpu_features():
     """Test: CPU feature detection"""
     print("Test 9: CPU features")
     features = dashem.detect_cpu_features()
-    print(f"✓ CPU Features: 0x{features:08x}\n")
+    print(f"[PASS] CPU Features: 0x{features:08x}\n")
     assert isinstance(features, int), "Features should be an integer"
 
 
@@ -105,13 +105,13 @@ if __name__ == "__main__":
         test_type_error()
         test_cpu_features()
         print("=" * 32)
-        print("✓ All tests passed!\n")
+        print("[PASS] All tests passed!\n")
         sys.exit(0)
     except AssertionError as e:
-        print(f"\n✗ Test failed: {e}\n")
+        print(f"\n[FAIL] Test failed: {e}\n")
         sys.exit(1)
     except Exception as e:
-        print(f"\n✗ Error: {e}\n")
+        print(f"\n[FAIL] Error: {e}\n")
         import traceback
         traceback.print_exc()
         sys.exit(1)
