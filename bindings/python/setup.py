@@ -3,7 +3,6 @@ Setup script for dash-em Python package
 """
 
 from setuptools import setup, Extension
-import os
 import platform
 import sys
 
@@ -26,19 +25,16 @@ def get_compile_args():
 
     return args
 
-# Resolve paths relative to this file
-base_dir = os.path.dirname(os.path.abspath(__file__))
-src_dir = os.path.join(base_dir, '..', '..', 'src')
-
 # Build the C extension
+# Note: dashem.c and dashem.h are copied from ../../src/ during package setup
 ext_modules = [
     Extension(
         'dashem_native',
         sources=[
-            os.path.join(src_dir, 'dashem.c'),
-            os.path.join(base_dir, 'dashem_native.c'),
+            'dashem.c',
+            'dashem_native.c',
         ],
-        include_dirs=[src_dir],
+        include_dirs=['.'],
         extra_compile_args=get_compile_args(),
         language='c',
     )
