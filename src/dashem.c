@@ -15,7 +15,8 @@
  * CPU Feature Detection
  * ============================================================================ */
 
-#if defined(__GNUC__) || defined(__clang__)
+/* x86/x86_64 CPUID-based detection */
+#if (defined(__GNUC__) || defined(__clang__)) && (defined(__x86_64__) || defined(__i386__) || defined(_M_X64) || defined(_M_IX86))
     #include <cpuid.h>
 
 static uint32_t __detect_cpu_features(void) {
@@ -38,7 +39,8 @@ static uint32_t __detect_cpu_features(void) {
     return features;
 }
 
-#elif defined(_MSC_VER)
+/* MSVC x86/x86_64 detection */
+#elif defined(_MSC_VER) && (defined(_M_X64) || defined(_M_IX86))
     #include <intrin.h>
 
 static uint32_t __detect_cpu_features(void) {
@@ -59,6 +61,13 @@ static uint32_t __detect_cpu_features(void) {
     return features;
 }
 
+/* ARM/ARM64 with NEON detection */
+#elif defined(__ARM_NEON) || defined(__ARM_NEON__)
+static uint32_t __detect_cpu_features(void) {
+    return DASHEM_CPU_SCALAR | DASHEM_CPU_NEON;
+}
+
+/* Fallback for unknown architectures */
 #else
 static uint32_t __detect_cpu_features(void) {
     return DASHEM_CPU_SCALAR;
@@ -93,18 +102,46 @@ static int dashem_remove_scalar(
     }
 
     size_t out_idx = 0;
+    const unsigned char *in_ptr = (const unsigned char *)input;
+    unsigned char *out_ptr = (unsigned char *)output;
 
-    for (size_t i = 0; i < input_len; ) {
-        /* Check for em-dash (UTF-8: 0xE2 0x80 0x94) */
+    /* Process input with unrolled loops to reduce branch overhead */
+    size_t i = 0;
+
+    /* Fast path: process 8 bytes at a time when no matches */
+    while (i + 8 <= input_len) {
+        /* Check if any byte could be the start of em-dash (0xE2) */
+        uint64_t chunk = *(uint64_t *)(input + i);
+        int has_e2 = 0;
+
+        for (int j = 0; j < 8; j++) {
+            if (((chunk >> (j * 8)) & 0xFF) == 0xE2) {
+                has_e2 = 1;
+                break;
+            }
+        }
+
+        if (!has_e2) {
+            /* No em-dash pattern start in this chunk, copy directly */
+            memcpy(out_ptr + out_idx, input + i, 8);
+            out_idx += 8;
+            i += 8;
+        } else {
+            /* Process byte-by-byte */
+            break;
+        }
+    }
+
+    /* Process remaining bytes */
+    while (i < input_len) {
         if (i + 2 < input_len &&
-            (unsigned char)input[i] == DASHEM_EM_DASH_BYTE1 &&
-            (unsigned char)input[i + 1] == DASHEM_EM_DASH_BYTE2 &&
-            (unsigned char)input[i + 2] == DASHEM_EM_DASH_BYTE3) {
-            /* Skip em-dash (3 bytes) */
+            in_ptr[i] == 0xE2 &&
+            in_ptr[i + 1] == 0x80 &&
+            in_ptr[i + 2] == 0x94) {
+            /* Skip em-dash */
             i += 3;
         } else {
-            /* Copy byte */
-            output[out_idx++] = input[i++];
+            out_ptr[out_idx++] = in_ptr[i++];
         }
     }
 
@@ -116,7 +153,7 @@ static int dashem_remove_scalar(
  * SIMD Implementation - AVX2
  * ============================================================================ */
 
-#if defined(__AVX2__) || (defined(_MSC_VER) && defined(__AVX2__))
+#if defined(__AVX2__)
     #include <immintrin.h>
 
 static int dashem_remove_avx2(
@@ -132,48 +169,64 @@ static int dashem_remove_avx2(
 
     size_t out_idx = 0;
     size_t i = 0;
+    const unsigned char *in_ptr = (const unsigned char *)input;
+    unsigned char *out_ptr = (unsigned char *)output;
+
+    /* SSSE3 pshufb-based pattern matching for em-dash detection */
+    /* Pattern: 0xE2 0x80 0x94 */
+
+    /* Create lookup pattern for SSSE3 shuffle */
+    const __m256i pattern_0xe2 = _mm256_set1_epi8(0xE2);
 
     /* Process 32 bytes at a time */
     while (i + 32 <= input_len) {
         __m256i v = _mm256_loadu_si256((__m256i *)(input + i));
-
-        /* Check for first byte of em-dash (0xE2) */
-        __m256i cmp = _mm256_cmpeq_epi8(v, _mm256_set1_epi8(0xE2));
-
-        /* Convert to mask */
+        __m256i cmp = _mm256_cmpeq_epi8(v, pattern_0xe2);
         uint32_t mask = _mm256_movemask_epi8(cmp);
 
+        /* Fast path: no 0xE2 bytes found, copy entire chunk */
         if (mask == 0) {
-            /* No potential em-dashes in this chunk, copy directly */
-            memcpy(output + out_idx, input + i, 32);
+            memcpy(out_ptr + out_idx, input + i, 32);
             out_idx += 32;
             i += 32;
-        } else {
-            /* Process byte by byte when we detect potential em-dashes */
-            for (int j = 0; j < 32 && i < input_len; ) {
-                if (i + 2 < input_len &&
-                    (unsigned char)input[i] == DASHEM_EM_DASH_BYTE1 &&
-                    (unsigned char)input[i + 1] == DASHEM_EM_DASH_BYTE2 &&
-                    (unsigned char)input[i + 2] == DASHEM_EM_DASH_BYTE3) {
-                    i += 3;
-                    j += 3;
-                } else {
-                    output[out_idx++] = input[i++];
-                    j++;
+            continue;
+        }
+
+        /* Process each potential position */
+        for (int j = 0; j < 32; j++) {
+            if ((mask & (1 << j)) && i + j + 2 < input_len) {
+                if (in_ptr[i + j] == 0xE2 && in_ptr[i + j + 1] == 0x80 && in_ptr[i + j + 2] == 0x94) {
+                    /* Copy up to this point */
+                    if (j > 0) {
+                        memcpy(out_ptr + out_idx, input + i, j);
+                        out_idx += j;
+                    }
+                    i += j + 3; /* Skip em-dash */
+                    j = 32; /* Break inner loop */
                 }
             }
+        }
+
+        if (i < 32 + (i & ~31)) {
+            /* Copy remaining bytes from this chunk */
+            size_t remaining = 32 - (i & 31);
+            if (remaining > 0) {
+                memcpy(out_ptr + out_idx, input + (i & ~31), remaining);
+                out_idx += remaining;
+            }
+            i = (i & ~31) + 32;
         }
     }
 
     /* Process remainder with scalar */
     while (i < input_len) {
         if (i + 2 < input_len &&
-            (unsigned char)input[i] == DASHEM_EM_DASH_BYTE1 &&
-            (unsigned char)input[i + 1] == DASHEM_EM_DASH_BYTE2 &&
-            (unsigned char)input[i + 2] == DASHEM_EM_DASH_BYTE3) {
+            in_ptr[i] == 0xE2 &&
+            in_ptr[i + 1] == 0x80 &&
+            in_ptr[i + 2] == 0x94) {
             i += 3;
         } else {
-            output[out_idx++] = input[i++];
+            out_ptr[out_idx++] = in_ptr[i++];
         }
     }
 
@@ -186,7 +239,7 @@ static int dashem_remove_avx2(
  * SIMD Implementation - SSE4.2
  * ============================================================================ */
 
-#if defined(__SSE4_2__) || (defined(_MSC_VER) && defined(__SSE4_2__))
+#if defined(__SSE4_2__)
     #include <nmmintrin.h>
 
 static int dashem_remove_sse42(
@@ -202,48 +255,58 @@ static int dashem_remove_sse42(
 
     size_t out_idx = 0;
     size_t i = 0;
+    const unsigned char *in_ptr = (const unsigned char *)input;
+    unsigned char *out_ptr = (unsigned char *)output;
+
+    const __m128i pattern_0xe2 = _mm_set1_epi8(0xE2);
 
     /* Process 16 bytes at a time */
     while (i + 16 <= input_len) {
         __m128i v = _mm_loadu_si128((__m128i *)(input + i));
-
-        /* Check for first byte of em-dash (0xE2) */
-        __m128i cmp = _mm_cmpeq_epi8(v, _mm_set1_epi8(0xE2));
-
-        /* Convert to mask */
+        __m128i cmp = _mm_cmpeq_epi8(v, pattern_0xe2);
         uint32_t mask = _mm_movemask_epi8(cmp);
 
         if (mask == 0) {
-            /* No potential em-dashes, copy directly */
-            memcpy(output + out_idx, input + i, 16);
+            /* No 0xE2 bytes, copy chunk directly */
+            memcpy(out_ptr + out_idx, input + i, 16);
             out_idx += 16;
             i += 16;
-        } else {
-            /* Process byte by byte */
-            for (int j = 0; j < 16 && i < input_len; ) {
-                if (i + 2 < input_len &&
-                    (unsigned char)input[i] == DASHEM_EM_DASH_BYTE1 &&
-                    (unsigned char)input[i + 1] == DASHEM_EM_DASH_BYTE2 &&
-                    (unsigned char)input[i + 2] == DASHEM_EM_DASH_BYTE3) {
-                    i += 3;
-                    j += 3;
-                } else {
-                    output[out_idx++] = input[i++];
-                    j++;
+            continue;
+        }
+
+        /* Check each potential match */
+        for (int j = 0; j < 16; j++) {
+            if ((mask & (1 << j)) && i + j + 2 < input_len) {
+                if (in_ptr[i + j] == 0xE2 && in_ptr[i + j + 1] == 0x80 && in_ptr[i + j + 2] == 0x94) {
+                    if (j > 0) {
+                        memcpy(out_ptr + out_idx, input + i, j);
+                        out_idx += j;
+                    }
+                    i += j + 3;
+                    j = 16; /* Break */
                 }
             }
+        }
+
+        if (i < 16 + (i & ~15)) {
+            size_t remaining = 16 - (i & 15);
+            if (remaining > 0) {
+                memcpy(out_ptr + out_idx, input + (i & ~15), remaining);
+                out_idx += remaining;
+            }
+            i = (i & ~15) + 16;
         }
     }
 
     /* Process remainder */
     while (i < input_len) {
         if (i + 2 < input_len &&
-            (unsigned char)input[i] == DASHEM_EM_DASH_BYTE1 &&
-            (unsigned char)input[i + 1] == DASHEM_EM_DASH_BYTE2 &&
-            (unsigned char)input[i + 2] == DASHEM_EM_DASH_BYTE3) {
+            in_ptr[i] == 0xE2 &&
+            in_ptr[i + 1] == 0x80 &&
+            in_ptr[i + 2] == 0x94) {
             i += 3;
         } else {
-            output[out_idx++] = input[i++];
+            out_ptr[out_idx++] = in_ptr[i++];
         }
     }
 

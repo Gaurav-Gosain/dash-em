@@ -64,6 +64,14 @@ target_include_directories(test_dashem PRIVATE src)
 add_test(NAME DashemTests COMMAND test_dashem)
 
 # ============================================================================
+# Benchmarks
+# ============================================================================
+
+add_executable(bench_dashem benchmarks/bench_dashem.c)
+target_link_libraries(bench_dashem PRIVATE dashem_static)
+target_include_directories(bench_dashem PRIVATE src)
+
+# ============================================================================
 # Installation
 # ============================================================================
 

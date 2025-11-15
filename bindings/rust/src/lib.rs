@@ -3,7 +3,7 @@
 //! This crate provides safe Rust bindings to the high-performance C library
 //! for removing em-dashes (U+2014) from UTF-8 encoded strings.
 
-extern "C" {
+unsafe extern "C" {
     fn dashem_remove(
         input: *const u8,
         input_len: usize,

@@ -7,21 +7,12 @@ The underlying C implementation uses SIMD optimizations for maximum performance.
 package dashem
 
 /*
-#cgo CFLAGS: -O3 -march=native
+#cgo CFLAGS: -O3 -march=native -I${SRCDIR}/../../src
 #cgo LDFLAGS: -L${SRCDIR}/../../build -ldashem
 
 #include "dashem.h"
 #include <stdlib.h>
 #include <string.h>
-
-// Helper function to handle memory
-char* allocate_string(size_t size) {
-    return (char*)malloc(size);
-}
-
-void free_string(char* ptr) {
-    free(ptr);
-}
 */
 import "C"
 
