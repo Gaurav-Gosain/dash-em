@@ -18,7 +18,10 @@
   ],
   "author": "Gaurav Gosain",
   "license": "MIT",
-  "repository": "https://github.com/Gaurav-Gosain/dash-em",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Gaurav-Gosain/dash-em.git"
+  },
   "gypfile": true,
   "files": [
     "index.js",
