@@ -23,8 +23,8 @@ let dashem = null;
 let DASHEM_AVAILABLE = false;
 
 try {
-    // Try local build first
-    dashem = require(path.join(__dirname, '../../../bindings/node/build/Release/dashem.node'));
+    // Try local build first (use wrapper to get Buffer functions)
+    dashem = require(path.join(__dirname, '../../../bindings/node'));
     DASHEM_AVAILABLE = true;
 } catch (e1) {
     try {
@@ -180,10 +180,8 @@ function removeEmdashDashem(buffer) {
     if (!DASHEM_AVAILABLE) {
         throw new Error('dash-em not available');
     }
-    // dashem.remove() expects a string and returns a string
-    const text = buffer.toString('utf-8');
-    const result = dashem.remove(text);
-    return Buffer.from(result, 'utf-8');
+    // Use removeBuffer for zero-copy operation (no UTF-8 conversion overhead)
+    return dashem.removeBuffer(buffer);
 }
 
 // Test data generation

@@ -7,6 +7,25 @@
 export function remove(input: string): string;
 
 /**
+ * Remove em-dashes from a Buffer (zero-copy, high-performance)
+ *
+ * @param buffer - Input Buffer
+ * @returns New Buffer with em-dashes removed
+ */
+export function removeBuffer(buffer: Buffer): Buffer;
+
+/**
+ * Remove em-dashes from a Buffer in-place (ultra-fast, modifies input!)
+ *
+ * WARNING: This modifies the input Buffer. The returned length indicates
+ * how many bytes of the buffer are valid after removal.
+ *
+ * @param buffer - Input Buffer (will be modified)
+ * @returns New length of valid data in buffer
+ */
+export function removeBufferInPlace(buffer: Buffer): number;
+
+/**
  * Get library version
  *
  * @returns Version string

@@ -19,6 +19,35 @@ function remove(input) {
 }
 
 /**
+ * Remove em-dashes from a Buffer (zero-copy, high-performance)
+ *
+ * @param {Buffer} buffer - Input Buffer
+ * @returns {Buffer} New Buffer with em-dashes removed
+ */
+function removeBuffer(buffer) {
+    if (!Buffer.isBuffer(buffer)) {
+        throw new TypeError('Input must be a Buffer');
+    }
+    return addon.removeBuffer(buffer);
+}
+
+/**
+ * Remove em-dashes from a Buffer in-place (ultra-fast, modifies input!)
+ *
+ * WARNING: This modifies the input Buffer. The returned length indicates
+ * how many bytes of the buffer are valid after removal.
+ *
+ * @param {Buffer} buffer - Input Buffer (will be modified)
+ * @returns {number} New length of valid data in buffer
+ */
+function removeBufferInPlace(buffer) {
+    if (!Buffer.isBuffer(buffer)) {
+        throw new TypeError('Input must be a Buffer');
+    }
+    return addon.removeBufferInPlace(buffer);
+}
+
+/**
  * Get library version
  *
  * @returns {string} Version string
@@ -38,6 +67,8 @@ function implementationName() {
 
 module.exports = {
     remove,
+    removeBuffer,
+    removeBufferInPlace,
     version,
     implementationName,
 };
