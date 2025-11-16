@@ -102,7 +102,7 @@ jobs:
         if: github.event.inputs.full_suite == 'true' || github.event_name == 'schedule'
 
       - name: Upload benchmark results
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: benchmark-results-${{ matrix.os }}-${{ matrix.compiler }}-${{ matrix.arch }}
           path: ${{ env.BENCHMARK_RESULTS_DIR }}/*.json
@@ -150,7 +150,7 @@ jobs:
         if: github.event.inputs.full_suite == 'true' || github.event_name == 'schedule'
 
       - name: Upload benchmark results
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: benchmark-results-${{ matrix.os }}-${{ matrix.arch }}
           path: ${{ env.BENCHMARK_RESULTS_DIR }}/*.json
@@ -247,7 +247,7 @@ jobs:
           esac
 
       - name: Upload language comparison results
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: language-comparison-${{ matrix.language }}
           path: ${{ env.BENCHMARK_RESULTS_DIR }}/*.json
@@ -274,7 +274,7 @@ jobs:
           pip install pandas numpy matplotlib seaborn jinja2
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           path: artifacts/
 
@@ -360,7 +360,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Download current results
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: benchmark-results-ubuntu-22.04-gcc-12-x86_64
 
