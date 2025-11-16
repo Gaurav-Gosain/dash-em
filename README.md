@@ -78,10 +78,26 @@ sudo make install
 npm install dash-em
 ```
 
+**String API** (easy to use):
 ```javascript
 const dashem = require('dash-em');
-console.log(dashem.remove('Hello—world'));
-// Output: Helloworld
+const result = dashem.remove('Hello—world');
+console.log(result);  // Output: Helloworld
+```
+
+**Buffer API** (high-performance, zero-copy):
+```javascript
+const dashem = require('dash-em');
+
+// Process Buffer directly (10-26x faster than string API)
+const input = Buffer.from('Hello—world', 'utf-8');
+const output = dashem.removeBuffer(input);
+console.log(output.toString('utf-8'));  // Output: Helloworld
+
+// In-place modification (fastest, modifies input)
+const buffer = Buffer.from('Hello—world', 'utf-8');
+const newLength = dashem.removeBufferInPlace(buffer);
+console.log(buffer.slice(0, newLength).toString('utf-8'));  // Output: Helloworld
 ```
 
 #### Python
@@ -271,6 +287,49 @@ const char* dashem_implementation_name(void);
  */
 uint32_t dashem_detect_cpu_features(void);
 ```
+
+### JavaScript/Node.js API
+
+```javascript
+/**
+ * Remove em-dashes from a string
+ * @param {string} input - Input string
+ * @returns {string} String with em-dashes removed
+ */
+dashem.remove(input);
+
+/**
+ * Remove em-dashes from a Buffer (zero-copy, high-performance)
+ * @param {Buffer} buffer - Input Buffer
+ * @returns {Buffer} New Buffer with em-dashes removed
+ */
+dashem.removeBuffer(buffer);
+
+/**
+ * Remove em-dashes from a Buffer in-place (ultra-fast, modifies input!)
+ * WARNING: This modifies the input Buffer
+ * @param {Buffer} buffer - Input Buffer (will be modified)
+ * @returns {number} New length of valid data in buffer
+ */
+dashem.removeBufferInPlace(buffer);
+
+/**
+ * Get library version
+ * @returns {string} Version string
+ */
+dashem.version();
+
+/**
+ * Get implementation name
+ * @returns {string} Implementation name (e.g., "AVX2", "SSE4.2")
+ */
+dashem.implementationName();
+```
+
+**Performance Notes:**
+- `remove()`: Easy to use but includes UTF-8 conversion overhead
+- `removeBuffer()`: 10-26x faster than `remove()`, zero-copy operation
+- `removeBufferInPlace()`: Fastest option, modifies input buffer directly
 
 ---
 

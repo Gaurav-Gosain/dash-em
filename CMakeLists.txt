@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.12)
 project(dash-em
-    VERSION 1.0.0
+    VERSION 1.0.1
     DESCRIPTION "Enterprise-Grade Em-Dash Removal Library"
     LANGUAGES C
 )

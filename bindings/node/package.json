@@ -1,6 +1,6 @@
 {
   "name": "dash-em",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Enterprise-Grade Em-Dash Removal Library — SIMD-Accelerated String Processing",
   "main": "index.js",
   "types": "index.d.ts",
@@ -16,11 +16,18 @@
     "performance",
     "native"
   ],
-  "author": "Gaurav Gosain",
+  "author": {
+    "name": "Gaurav Gosain",
+    "email": "itsgauravgosain@gmail.com"
+  },
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/Gaurav-Gosain/dash-em.git"
+  },
+  "homepage": "https://github.com/Gaurav-Gosain/dash-em#readme",
+  "bugs": {
+    "url": "https://github.com/Gaurav-Gosain/dash-em/issues"
   },
   "gypfile": true,
   "files": [
