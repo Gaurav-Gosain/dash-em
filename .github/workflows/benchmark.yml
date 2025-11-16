@@ -320,8 +320,8 @@ jobs:
           cp ${{ env.BENCHMARK_RESULTS_DIR }}/latest.json \
              ${{ env.BENCHMARK_RESULTS_DIR }}/history/${TIMESTAMP}/
 
-          # Add and commit
-          git add ${{ env.BENCHMARK_RESULTS_DIR }}
+          # Add and commit (force add results dir since it's in gitignore)
+          git add -f ${{ env.BENCHMARK_RESULTS_DIR }}
           git add README.md
           git commit -m "Update benchmark results - ${TIMESTAMP}" || true
 
