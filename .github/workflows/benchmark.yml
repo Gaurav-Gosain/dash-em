@@ -331,6 +331,24 @@ jobs:
           # Push to results branch
           git push origin ${{ env.BENCHMARK_RESULTS_BRANCH }} --force
 
+          # Also update README on main branch
+          git checkout main
+          git pull origin main
+
+          # Apply the updated README from benchmark-results branch
+          git checkout ${{ env.BENCHMARK_RESULTS_BRANCH }} -- README.md
+
+          # Commit and push to main
+          if git diff --quiet README.md; then
+            echo "No README changes to push to main"
+          else
+            git add README.md
+            git commit -m "docs: Update benchmark results in README [skip ci]
+
+Auto-updated from benchmark workflow - ${TIMESTAMP}"
+            git push origin main
+          fi
+
       - name: Create benchmark badge
         run: |
           # Extract key metric for badge

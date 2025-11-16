@@ -98,6 +98,20 @@ def generate_architecture_table(data: Dict[str, Any]) -> List[str]:
     return lines
 
 
+def format_time_us(time_us: float) -> str:
+    """Format microsecond time with appropriate precision."""
+    if time_us == 0:
+        return "0.0"
+    elif time_us < 0.01:
+        return f"{time_us:.4f}"
+    elif time_us < 1:
+        return f"{time_us:.3f}"
+    elif time_us < 10:
+        return f"{time_us:.2f}"
+    else:
+        return f"{time_us:.1f}"
+
+
 def generate_language_comparison(data: Dict[str, Any]) -> List[str]:
     """Generate language comparison section."""
     lines = ["## Language Comparison", ""]
@@ -138,8 +152,8 @@ def generate_language_comparison(data: Dict[str, Any]) -> List[str]:
             dashem_time = dashem.get('timing_us', {}).get('mean', 0)
             speedup = native_time / dashem_time if dashem_time > 0 else 0
 
-            lines.append(f"| {lang_name} | {pattern} | {native_time:.1f} | "
-                        f"{dashem_time:.1f} | {speedup:.2f}x |")
+            lines.append(f"| {lang_name} | {pattern} | {format_time_us(native_time)} | "
+                        f"{format_time_us(dashem_time)} | {speedup:.2f}x |")
 
     lines.append("")
     return lines

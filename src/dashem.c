@@ -808,10 +808,11 @@ static int dashem_remove_avx2(
         /* Secondary density check after full pattern matching */
         int match_count = DASHEM_POPCOUNT(em_dash_mask);
         if (match_count >= 4) {
-            /* Dense pattern detected - process byte-by-byte for this chunk */
-            size_t chunk_end = i + 32;
-            size_t j = (write_pos > i) ? write_pos : i;
-            while (j < chunk_end && j < input_len) {
+            /* Dense pattern detected - process byte-by-byte for this chunk
+             * Simplified loop without extra checks for better performance */
+            size_t chunk_end = (i + 32 <= input_len) ? i + 32 : input_len;
+            size_t j = i;
+            while (j < chunk_end) {
                 if (j + 3 <= input_len &&
                     in_ptr[j] == 0xE2 &&
                     in_ptr[j + 1] == 0x80 &&
@@ -822,7 +823,7 @@ static int dashem_remove_avx2(
                 }
             }
             write_pos = j;
-            i = chunk_end;
+            i = j;
             continue;
         }
 
