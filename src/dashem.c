@@ -1333,8 +1333,10 @@ static int dashem_remove_avx512_compress(
     const __m512i pattern_80 = _mm512_set1_epi8((char)0x80);
     const __m512i pattern_94 = _mm512_set1_epi8((char)0x94);
 
-    /* Process 64 bytes at a time - VPCOMPRESSB works on full 512-bit vectors */
-    while (i + 66 <= input_len) {  /* +2 for safe pattern detection */
+    /* Process 61 bytes at a time to avoid boundary-spanning em-dashes
+     * We load 64 bytes for pattern detection, but only output 61 bytes.
+     * This creates a 3-byte overlap ensuring any em-dash is fully contained. */
+    while (i + 64 <= input_len) {  /* Need 64 bytes for overlapped reads at +1, +2 */
         /* Prefetch for next iteration */
         if (i + 128 < input_len) {
             _mm_prefetch(input + i + 128, _MM_HINT_T0);
@@ -1345,7 +1347,7 @@ static int dashem_remove_avx512_compress(
         __m512i v1 = _mm512_loadu_si512((__m512i *)(input + i + 1));
         __m512i v2 = _mm512_loadu_si512((__m512i *)(input + i + 2));
 
-        /* Detect em-dash starts using mask operations (more efficient than cmpeq) */
+        /* Detect em-dash starts using mask operations */
         __mmask64 match_e2 = _mm512_cmpeq_epi8_mask(v0, pattern_e2);
         __mmask64 match_80 = _mm512_cmpeq_epi8_mask(v1, pattern_80);
         __mmask64 match_94 = _mm512_cmpeq_epi8_mask(v2, pattern_94);
@@ -1353,40 +1355,42 @@ static int dashem_remove_avx512_compress(
         /* Full em-dash pattern: all three bytes must match */
         __mmask64 em_dash_start = match_e2 & match_80 & match_94;
 
-        if (em_dash_start == 0) {
-            /* Fast path: no em-dashes, direct store */
-            _mm512_storeu_si512((__m512i *)(out_ptr + out_idx), v0);
-            out_idx += 64;
-            i += 64;
+        /* CRITICAL: Only process first 61 bytes to avoid boundary issues.
+         * Mask restricts processing to bits 0-60 (61 bytes total).
+         * Bits 61-63 will be re-processed in next iteration. */
+        const __mmask64 process_mask = 0x1FFFFFFFFFFFFFFFULL;  /* Bits 0-60 (61 bytes) */
+
+        if ((em_dash_start & process_mask) == 0) {
+            /* Fast path: no em-dashes in first 61 bytes
+             * Only store 61 bytes using mask */
+            _mm512_mask_storeu_epi8(out_ptr + out_idx, process_mask, v0);
+            out_idx += 61;
+            i += 61;
             continue;
         }
 
-        /* CRITICAL: Filter out em-dashes that start at positions 62-63
-         * These would span beyond the 64-byte chunk and cause incorrect masking.
-         * We'll process them in the next iteration or scalar fallback. */
-        em_dash_start &= 0x3FFFFFFFFFFFFFFFULL;  /* Clear bits 62-63 */
+        /* Only process em-dashes in first 61 bytes */
+        em_dash_start &= process_mask;
 
         /* Create mask for bytes to KEEP (exclude em-dash bytes) */
-        __mmask64 keep_mask = ~em_dash_start;  /* Exclude first byte of em-dash */
+        __mmask64 keep_mask = ~em_dash_start & process_mask;
 
-        /* Also exclude bytes 2 and 3 of each em-dash */
-        __mmask64 em_dash_byte2 = em_dash_start << 1;  /* Safe now - no em-dashes at 62-63 */
+        /* Also exclude bytes 2 and 3 of each em-dash (safe - all within 61 bytes) */
+        __mmask64 em_dash_byte2 = em_dash_start << 1;
         __mmask64 em_dash_byte3 = em_dash_start << 2;
 
         /* Mask out all 3 bytes of each em-dash */
         keep_mask &= ~em_dash_byte2;
         keep_mask &= ~em_dash_byte3;
 
-        /* REVOLUTIONARY: Hardware-accelerated byte compaction!
-         * VPCOMPRESSB directly compacts bytes based on the keep_mask.
-         * This single instruction replaces dozens of memcpy calls. */
+        /* Hardware-accelerated byte compaction */
         _mm512_mask_compressstoreu_epi8(out_ptr + out_idx, keep_mask, v0);
 
         /* Update output index by counting kept bytes */
         out_idx += DASHEM_POPCOUNTLL(keep_mask);
 
-        /* Move to next chunk */
-        i += 64;
+        /* Advance by 61 bytes (3-byte overlap for next iteration) */
+        i += 61;
     }
 
     /* Process remainder with scalar fallback */
