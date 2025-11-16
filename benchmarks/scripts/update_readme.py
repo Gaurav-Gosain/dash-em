@@ -19,46 +19,121 @@ def load_results(filepath: Path) -> Dict[str, Any]:
         return json.load(f)
 
 
+def format_time_us(time_us: float) -> str:
+    """Format microsecond time with appropriate precision."""
+    if time_us == 0:
+        return "0.0"
+    elif time_us < 0.01:
+        return f"{time_us:.4f}"
+    elif time_us < 1:
+        return f"{time_us:.3f}"
+    elif time_us < 10:
+        return f"{time_us:.2f}"
+    else:
+        return f"{time_us:.1f}"
+
+
+def generate_language_comparison_table(data: Dict[str, Any]) -> List[str]:
+    """Generate language comparison table."""
+    lines = []
+
+    if 'languages' not in data or not data['languages']:
+        return lines
+
+    lines.extend([
+        "",
+        "### Language Bindings Performance",
+        "",
+        "Comparing dash-em bindings against native byte-level implementations:",
+        "",
+        "| Language | Test Pattern | Native (μs) | dash-em (μs) | Speedup |",
+        "|----------|--------------|-------------|--------------|---------|"
+    ])
+
+    for lang_name, lang_data in sorted(data['languages'].items()):
+        if 'benchmarks' not in lang_data:
+            continue
+
+        # Find bytes-level native methods and dashem results
+        native_results = {}
+        dashem_results = {}
+
+        for bench in lang_data['benchmarks']:
+            pattern = bench['name'].split('_')[0]
+            if 'dashem' in bench['method']:
+                dashem_results[pattern] = bench
+            elif 'manual_bytes' in bench['method'] or 'buffer' in bench['method']:
+                native_results[pattern] = bench
+
+        # Compare results
+        for pattern in sorted(set(native_results.keys()) & set(dashem_results.keys())):
+            native = native_results[pattern]
+            dashem = dashem_results[pattern]
+
+            native_time = native.get('timing_us', {}).get('mean', 0)
+            dashem_time = dashem.get('timing_us', {}).get('mean', 0)
+            speedup = native_time / dashem_time if dashem_time > 0 else 0
+
+            lines.append(f"| {lang_name} | {pattern} | {format_time_us(native_time)} | "
+                        f"{format_time_us(dashem_time)} | {speedup:.2f}x |")
+
+    return lines
+
+
 def generate_performance_table(data: Dict[str, Any]) -> List[str]:
     """Generate markdown performance table from results."""
     lines = []
 
-    # Extract latest results
-    if 'architectures' in data:
-        # Use first architecture as default
-        arch_name = list(data['architectures'].keys())[0] if data['architectures'] else None
+    # Extract latest results - show ALL architectures
+    if 'architectures' in data and data['architectures']:
+        lines.extend([
+            "### Core Library Performance",
+            "",
+            "Multi-architecture SIMD performance (statistical benchmarks):",
+            ""
+        ])
 
-        if arch_name and 'data' in data['architectures'][arch_name]:
-            arch_data = data['architectures'][arch_name]['data']
-
-            lines.extend([
-                "| Test Pattern | Input Size | Throughput (GB/s) | Speedup vs Naive | CPU Features |",
-                "|--------------|------------|------------------|------------------|--------------|"
-            ])
-
-            if 'benchmarks' in arch_data:
-                # Group benchmarks by pattern
-                patterns = {}
-                for bench in arch_data['benchmarks']:
+        # Collect all unique patterns across all architectures
+        all_patterns = set()
+        for arch_data in data['architectures'].values():
+            if 'data' in arch_data and 'benchmarks' in arch_data['data']:
+                for bench in arch_data['data']['benchmarks']:
                     pattern = bench['name'].split('_')[0] if '_' in bench['name'] else bench['name']
-                    if pattern not in patterns:
-                        patterns[pattern] = bench
+                    all_patterns.add(pattern)
 
-                # Output in consistent order
-                pattern_order = ['no_emdash', 'sparse', 'moderate', 'dense', 'alternating']
-                for pattern in pattern_order:
-                    if pattern in patterns:
-                        bench = patterns[pattern]
-                        size = bench.get('input_size', 0)
-                        throughput = bench.get('throughput_gbps', {}).get('mean', 0)
-                        speedup = bench.get('speedup_vs_naive', 1.0)
-                        impl = arch_data.get('implementation', 'Unknown')
+        # Sort patterns
+        pattern_order = ['no_emdash', 'sparse', 'moderate', 'dense', 'alternating', 'boundary']
+        sorted_patterns = [p for p in pattern_order if p in all_patterns]
+        sorted_patterns.extend(sorted(all_patterns - set(pattern_order)))
 
-                        lines.append(f"| {pattern:<12} | {size:>10} | {throughput:>16.2f} | "
-                                   f"{speedup:>16.2f}x | {impl:<12} |")
+        # Create table with all architectures
+        arch_names = list(data['architectures'].keys())
+        header = "| Pattern |" + "".join(f" {arch} |" for arch in arch_names)
+        separator = "|---------|" + "".join("----------|" for _ in arch_names)
+
+        lines.extend([header, separator])
+
+        for pattern in sorted_patterns:
+            row = [pattern]
+            for arch_name in arch_names:
+                arch_data = data['architectures'][arch_name].get('data', {})
+                value = "N/A"
+
+                if 'benchmarks' in arch_data:
+                    for bench in arch_data['benchmarks']:
+                        bench_pattern = bench['name'].split('_')[0] if '_' in bench['name'] else bench['name']
+                        if bench_pattern == pattern:
+                            throughput = bench.get('throughput_gbps', {}).get('mean', 0)
+                            speedup = bench.get('speedup_vs_naive', 1.0)
+                            value = f"{throughput:.2f} GB/s ({speedup:.2f}x)"
+                            break
+
+                row.append(value)
+
+            lines.append("| " + " | ".join(row) + " |")
 
     elif 'benchmarks' in data:
-        # Direct benchmark format
+        # Direct benchmark format (fallback)
         lines.extend([
             "| Test Pattern | Input Size | Throughput (GB/s) | Speedup vs Naive |",
             "|--------------|------------|------------------|------------------|"
@@ -71,6 +146,11 @@ def generate_performance_table(data: Dict[str, Any]) -> List[str]:
             speedup = bench.get('speedup_vs_naive', 1.0)
 
             lines.append(f"| {name:<12} | {size:>10} | {throughput:>16.2f} | {speedup:>16.2f}x |")
+
+    # Add language comparison if available
+    lang_table = generate_language_comparison_table(data)
+    if lang_table:
+        lines.extend(lang_table)
 
     return lines
 
