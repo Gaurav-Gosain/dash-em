@@ -907,6 +907,7 @@ scalar_fallback:
     /* Process remainder with optimized scalar loop.
      * This is also used as adaptive fallback when em-dash density is too high.
      * CRITICAL: Start from max(write_pos, i) to avoid duplicating already-processed bytes */
+    ;  /* Null statement required after label in C */
 
     /* Start from the maximum of write_pos and i to ensure we don't re-process bytes */
     size_t start_pos = (write_pos > i) ? write_pos : i;
