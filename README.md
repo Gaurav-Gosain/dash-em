@@ -158,7 +158,8 @@ package main
 
 import (
     "fmt"
-    "github.com/Gaurav-Gosain/dash-em/go"
+
+    dashem "github.com/Gaurav-Gosain/dash-em/go"
 )
 
 func main() {
