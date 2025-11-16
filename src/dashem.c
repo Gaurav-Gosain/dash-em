@@ -11,6 +11,11 @@
 #include <string.h>
 #include <stdio.h>
 
+/* MSVC needs intrin.h for popcount intrinsics */
+#if defined(_MSC_VER)
+    #include <intrin.h>
+#endif
+
 /* ============================================================================
  * Branch Prediction Hints
  * ============================================================================ */
@@ -33,10 +38,16 @@
     /* MSVC doesn't support __attribute__ */
     #define DASHEM_UNUSED
     #define DASHEM_ALWAYS_INLINE __forceinline
+    /* MSVC uses different intrinsic names for popcount */
+    #define DASHEM_POPCOUNT(x) __popcnt(x)
+    #define DASHEM_POPCOUNTLL(x) __popcnt64(x)
 #else
     /* GCC/Clang: use attribute to suppress unused warning */
     #define DASHEM_UNUSED __attribute__((unused))
     #define DASHEM_ALWAYS_INLINE __attribute__((always_inline)) inline
+    /* GCC/Clang: use builtins */
+    #define DASHEM_POPCOUNT(x) __builtin_popcount(x)
+    #define DASHEM_POPCOUNTLL(x) __builtin_popcountll(x)
 #endif
 
 /* ============================================================================
@@ -758,7 +769,7 @@ static int dashem_remove_avx2(
         /* Quick density check - just look for 0xE2 bytes */
         __m256i cmp0 = _mm256_cmpeq_epi8(v0, pattern_0xe2);
         uint32_t e2_mask = _mm256_movemask_epi8(cmp0);
-        int e2_count = __builtin_popcount(e2_mask);
+        int e2_count = DASHEM_POPCOUNT(e2_mask);
 
         /* If we see many 0xE2 bytes, skip expensive full pattern matching */
         /* Special case: exactly 8 0xE2 bytes = alternating pattern */
@@ -795,7 +806,7 @@ static int dashem_remove_avx2(
         uint32_t em_dash_mask = _mm256_movemask_epi8(full_match);
 
         /* Secondary density check after full pattern matching */
-        int match_count = __builtin_popcount(em_dash_mask);
+        int match_count = DASHEM_POPCOUNT(em_dash_mask);
         if (match_count >= 4) {
             /* Dense pattern detected - process byte-by-byte for this chunk */
             size_t chunk_end = i + 32;
@@ -1370,7 +1381,7 @@ static int dashem_remove_avx512_compress(
         _mm512_mask_compressstoreu_epi8(out_ptr + out_idx, keep_mask, v0);
 
         /* Update output index by counting kept bytes */
-        out_idx += __builtin_popcountll(keep_mask);
+        out_idx += DASHEM_POPCOUNTLL(keep_mask);
 
         /* Move to next chunk */
         i += 64;
@@ -1599,7 +1610,7 @@ static int dashem_remove_bmi2(
         uint64_t compacted = _pext_u64(chunk, keep_mask);
 
         /* Count how many bytes we're keeping */
-        int bytes_kept = __builtin_popcountll(keep_mask) / 8;
+        int bytes_kept = DASHEM_POPCOUNTLL(keep_mask) / 8;
 
         /* Store the compacted bytes */
         memcpy(out_ptr + out_idx, &compacted, bytes_kept);
