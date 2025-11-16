@@ -180,7 +180,10 @@ function removeEmdashDashem(buffer) {
     if (!DASHEM_AVAILABLE) {
         throw new Error('dash-em not available');
     }
-    return dashem.removeEmDashes(buffer);
+    // dashem.remove() expects a string and returns a string
+    const text = buffer.toString('utf-8');
+    const result = dashem.remove(text);
+    return Buffer.from(result, 'utf-8');
 }
 
 // Test data generation

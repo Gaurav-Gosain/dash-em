@@ -154,7 +154,10 @@ def remove_emdash_dashem(data: bytes) -> bytes:
     """Remove em-dashes using dash-em binding."""
     if not DASHEM_AVAILABLE:
         raise ImportError("dash-em not available")
-    return dashem.remove_emdashes(data)
+    # dashem.remove() expects str and returns str, so decode/encode
+    text = data.decode('utf-8')
+    result = dashem.remove(text)
+    return result.encode('utf-8')
 
 
 def count_emdashes(text: str) -> int:
