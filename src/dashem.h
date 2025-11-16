@@ -46,6 +46,8 @@ typedef enum {
     DASHEM_CPU_AVX2 = 8,        /**< AVX2 support */
     DASHEM_CPU_AVX512F = 16,    /**< AVX-512 Foundation support */
     DASHEM_CPU_NEON = 32,       /**< ARM NEON support */
+    DASHEM_CPU_AVX512VBMI2 = 64,/**< AVX-512 VBMI2 (has VPCOMPRESSB) */
+    DASHEM_CPU_BMI2 = 128,      /**< BMI2 (PEXT/PDEP) support */
 } dashem_cpu_flags_t;
 
 /**
@@ -94,11 +96,11 @@ uint32_t dashem_detect_cpu_features(void);
  * @note Output buffer must be at least as large as input buffer
  */
 int dashem_remove(
-    const char *input,
+    const char * restrict input,
     size_t input_len,
-    char *output,
+    char * restrict output,
     size_t output_capacity,
-    size_t *output_len
+    size_t * restrict output_len
 );
 
 /**

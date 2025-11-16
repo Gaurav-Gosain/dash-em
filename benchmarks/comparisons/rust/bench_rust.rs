@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::env;
-use std::time::{Duration, Instant};
-use serde::{Serialize};
+use std::time::Instant;
+use serde::Serialize;
 use regex::Regex;
 
 /// Rust native implementation benchmarks for dash-em comparison.
@@ -389,9 +389,18 @@ struct JsonOutput {
 }
 
 fn output_json(results: Vec<BenchmarkResult>, pretty: bool) {
+    // Get Rust version at runtime
+    let rustc_version = std::process::Command::new("rustc")
+        .arg("--version")
+        .output()
+        .ok()
+        .and_then(|out| String::from_utf8(out.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+
     let output = JsonOutput {
         language: "rust".to_string(),
-        version: env!("RUSTC_VERSION").to_string(),
+        version: rustc_version,
         dashem_available: false, // TODO: Update when binding available
         timestamp: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -408,9 +417,18 @@ fn output_json(results: Vec<BenchmarkResult>, pretty: bool) {
 }
 
 fn output_table(results: &[BenchmarkResult]) {
+    // Get Rust version at runtime
+    let rustc_version = std::process::Command::new("rustc")
+        .arg("--version")
+        .output()
+        .ok()
+        .and_then(|out| String::from_utf8(out.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+
     println!("\nRust Em-dash Removal Benchmarks");
     println!("================================");
-    println!("Rust version: {}", env!("RUSTC_VERSION"));
+    println!("Rust version: {}", rustc_version);
     println!("dash-em available: false\n"); // TODO: Update when binding available
 
     println!("{:<25} {:<15} {:>10} {:>8} {:>12} {:>12} {:>8} {:>6}",

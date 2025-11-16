@@ -224,10 +224,12 @@ if(UNIX)
 endif()
 target_include_directories(bench_statistical PRIVATE src)
 
-# Real-world corpus benchmark
-add_executable(bench_corpus benchmarks/bench_corpus.c)
-target_link_libraries(bench_corpus PRIVATE dashem_static)
-target_include_directories(bench_corpus PRIVATE src)
+# Real-world corpus benchmark (Unix only - uses dirent.h)
+if(UNIX)
+    add_executable(bench_corpus benchmarks/bench_corpus.c)
+    target_link_libraries(bench_corpus PRIVATE dashem_static)
+    target_include_directories(bench_corpus PRIVATE src)
+endif()
 
 # Pattern-specific benchmark
 add_executable(bench_patterns benchmarks/bench_patterns.c)
@@ -245,20 +247,34 @@ if(BUILD_BENCHMARKS)
     set(BENCHMARK_TARGETS
         bench_dashem
         bench_statistical
-        bench_corpus
         bench_patterns
     )
 
+    if(UNIX)
+        list(APPEND BENCHMARK_TARGETS bench_corpus)
+    endif()
+
     # Add custom target for running all benchmarks
-    add_custom_target(run_benchmarks
-        COMMAND bench_dashem
-        COMMAND bench_statistical
-        COMMAND bench_corpus
-        COMMAND bench_patterns
-        DEPENDS ${BENCHMARK_TARGETS}
-        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-        COMMENT "Running all benchmarks"
-    )
+    if(UNIX)
+        add_custom_target(run_benchmarks
+            COMMAND bench_dashem
+            COMMAND bench_statistical
+            COMMAND bench_corpus
+            COMMAND bench_patterns
+            DEPENDS ${BENCHMARK_TARGETS}
+            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+            COMMENT "Running all benchmarks"
+        )
+    else()
+        add_custom_target(run_benchmarks
+            COMMAND bench_dashem
+            COMMAND bench_statistical
+            COMMAND bench_patterns
+            DEPENDS ${BENCHMARK_TARGETS}
+            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+            COMMENT "Running all benchmarks"
+        )
+    endif()
 endif()
 
 # ============================================================================

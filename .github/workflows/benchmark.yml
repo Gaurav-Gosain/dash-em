@@ -84,8 +84,13 @@ jobs:
             -DENABLE_LTO=ON
         shell: bash
 
-      - name: Build benchmarks
+      - name: Build benchmarks (Unix)
         run: cmake --build build --config Release --target bench_statistical bench_corpus bench_patterns
+        if: runner.os != 'Windows'
+
+      - name: Build benchmarks (Windows)
+        run: cmake --build build --config Release --target bench_statistical bench_patterns
+        if: runner.os == 'Windows'
 
       - name: Run statistical benchmarks
         run: |
@@ -95,7 +100,7 @@ jobs:
 
       - name: Run corpus benchmarks
         run: ./build/bench_corpus
-        if: github.event.inputs.full_suite == 'true' || github.event_name == 'schedule'
+        if: (github.event.inputs.full_suite == 'true' || github.event_name == 'schedule') && runner.os != 'Windows'
 
       - name: Run pattern benchmarks
         run: ./build/bench_patterns

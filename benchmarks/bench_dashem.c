@@ -207,11 +207,25 @@ static BenchResult benchmark_dashem(const char* input, size_t input_len, const c
     BenchResult result = {"dash-em", 0, 0, NULL, ref_len};
     int iterations = GET_ITERATIONS(input_len);
 
+    /* Allocate sufficient buffer for output (worst case: input_len bytes if no dashes removed) */
+    char* output_buf = (char*)malloc(input_len + 1);
+    if (!output_buf) {
+        fprintf(stderr, "ERROR: Failed to allocate output buffer\n");
+        exit(1);
+    }
+
     double start = get_time_us();
     for (int i = 0; i < iterations; i++) {
-        char output_buf[1024 * 1024];
         size_t out_len = 0;
-        dashem_remove(input, input_len, output_buf, sizeof(output_buf), &out_len);
+        int ret = dashem_remove(input, input_len, output_buf, input_len, &out_len);
+
+        if (ret != 0) {
+            fprintf(stderr, "ERROR: dashem_remove returned %d\n", ret);
+            fprintf(stderr, "  Return -1 indicates buffer overflow, -2 indicates invalid input\n");
+            fprintf(stderr, "  Input size: %zu, Output capacity: %zu\n", input_len, input_len);
+            exit(1);
+        }
+
         result.output_size = out_len;
 
         /* Validate output matches reference */
@@ -224,6 +238,7 @@ static BenchResult benchmark_dashem(const char* input, size_t input_len, const c
     double end = get_time_us();
 
     result.time_us = (end - start) / iterations;
+    free(output_buf);
     return result;
 }
 

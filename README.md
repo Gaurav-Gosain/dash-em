@@ -276,33 +276,27 @@ uint32_t dashem_detect_cpu_features(void);
 
 ## Benchmarking
 
-### v1.0.0 Benchmark Results
+### v1.0.1 Benchmark Results
 
-Run on modern hardware with AVX2 support:
+Run on modern x86-64 hardware with AVX2 support (Linux):
 
 #### Test Case 1: No Em-Dashes (Fast Path)
 - **Input:** 99,999 bytes with no em-dashes
-- **dash-em:** 3.66 µs (25.45 GB/s throughput)
-- **Naive Implementation:** 49.77 µs
-- **Speedup:** **13.60x faster** ⚡
+- **dash-em:** 6.00 µs (15.51 GB/s throughput)
+- **Naive Implementation:** 59.71 µs
+- **Speedup:** **9.95x faster** ⚡
 
 #### Test Case 2: Regular Pattern (1000 em-dashes)
 - **Input:** 14,000 bytes
-- **dash-em:** 3.99 µs (3.27 GB/s throughput)
-- **Naive Implementation:** 6.18 µs
-- **Speedup:** **1.55x faster**
+- **dash-em:** 6.82 µs (1.91 GB/s throughput)
+- **Naive Implementation:** 7.51 µs
+- **Speedup:** **1.10x faster**
 
 #### Test Case 3: Alternating Pattern (dense)
 - **Input:** 20,000 bytes with em-dash every 4 bytes
-- **dash-em:** 14.38 µs (1.30 GB/s throughput)
-- **Naive Implementation:** 6.64 µs
-- **Note:** Pathological case for SIMD; scalar approach faster
-
-#### Test Case 4: Large Input (100K em-dashes)
-- **Input:** 1,400,000 bytes with 100K em-dashes
-- **dash-em:** < 1 µs (4.8+ TB/s effective throughput)
-- **Naive Implementation:** 625.82 µs
-- **Speedup:** **2,326,484x faster** 🚀
+- **dash-em:** 7.01 µs (2.66 GB/s throughput)
+- **Naive Implementation:** 8.54 µs
+- **Speedup:** **1.22x faster**
 
 ### Running Your Own Benchmarks
 
