@@ -367,48 +367,24 @@ dashem.implementationName();
 
 ---
 
-## Benchmarking
+## Running Benchmarks
 
-### v1.0.1 Benchmark Results
+Performance benchmarks are automatically updated via GitHub Actions. See the **Performance** section above for the latest results across all architectures and language bindings.
 
-Run on modern x86-64 hardware with AVX2 support (Linux):
+To run benchmarks locally:
 
-#### Test Case 1: No Em-Dashes (Fast Path)
-- **Input:** 99,999 bytes with no em-dashes
-- **dash-em:** 6.00 µs (15.51 GB/s throughput)
-- **Naive Implementation:** 59.71 µs
-- **Speedup:** **9.95x faster** ⚡
-
-#### Test Case 2: Regular Pattern (1000 em-dashes)
-- **Input:** 14,000 bytes
-- **dash-em:** 6.82 µs (1.91 GB/s throughput)
-- **Naive Implementation:** 7.51 µs
-- **Speedup:** **1.10x faster**
-
-#### Test Case 3: Alternating Pattern (dense)
-- **Input:** 20,000 bytes with em-dash every 4 bytes
-- **dash-em:** 7.01 µs (2.66 GB/s throughput)
-- **Naive Implementation:** 8.54 µs
-- **Speedup:** **1.22x faster**
-
-### Running Your Own Benchmarks
-
-To run comprehensive performance benchmarks—across all language bindings:
-
+**C/C++ Core Library:**
 ```bash
 cd build && ./bench_dashem
 ```
 
-Results show performance characteristics across various input patterns and sizes.
-
-For detailed multi-language benchmarking:
-
+**Multi-Language Benchmarks:**
 ```bash
 cd benchmarks
 ./run_all_benchmarks.sh
 ```
 
-Results are generated in—JSON format—for easy integration with—continuous performance monitoring—systems.
+Results are generated in JSON format for easy integration with continuous performance monitoring systems.
 
 ---
 
