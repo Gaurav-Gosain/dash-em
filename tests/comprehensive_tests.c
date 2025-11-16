@@ -206,15 +206,19 @@ static int test_lorem_ipsum_1000(void) {
     size_t out_len = 0;
     int result = dashem_remove(input, input_pos, test_output_buf, TEST_BUF_SIZE, &out_len);
 
-    free(input);
-    free(expected);
-
     if (result != 0) {
         fprintf(stderr, "Lorem ipsum 1000 test failed: expected 0, got %d\n", result);
+        free(input);
+        free(expected);
         return 0;
     }
 
-    return verify_output(test_output_buf, out_len, expected, expected_pos);
+    int verified = verify_output(test_output_buf, out_len, expected, expected_pos);
+
+    free(input);
+    free(expected);
+
+    return verified;
 }
 
 /**

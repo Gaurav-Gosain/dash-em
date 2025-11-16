@@ -20,6 +20,9 @@ env:
   BENCHMARK_RESULTS_BRANCH: benchmark-results
   BENCHMARK_RESULTS_DIR: benchmarks/results
 
+permissions:
+  contents: write
+
 jobs:
   # x86_64 Architectures
   benchmark-x86-64:
