@@ -165,9 +165,9 @@ jobs:
 
       - name: Build
         run: go build -v
-        working-directory: bindings/go
+        working-directory: go
         env:
-          CGO_LDFLAGS: -L../../build
+          CGO_LDFLAGS: -L../build
 
       - name: Run tests
         shell: bash
@@ -178,10 +178,10 @@ jobs:
             exit 0
           fi
           go test -v ./...
-        working-directory: bindings/go
+        working-directory: go
         env:
-          CGO_LDFLAGS: -L../../build
-          LD_LIBRARY_PATH: ../../build:$LD_LIBRARY_PATH
+          CGO_LDFLAGS: -L../build
+          LD_LIBRARY_PATH: ../build:$LD_LIBRARY_PATH
 
   build-java:
     name: Build Java Bindings

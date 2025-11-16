@@ -224,9 +224,9 @@ jobs:
               cd ../..
               ;;
             go)
-              cd bindings/go
+              cd go
               go build
-              cd ../..
+              cd ..
               ;;
             rust)
               cd bindings/rust
