@@ -92,19 +92,31 @@ jobs:
         run: cmake --build build --config Release --target bench_statistical bench_patterns
         if: runner.os == 'Windows'
 
-      - name: Run statistical benchmarks
+      - name: Run statistical benchmarks (Unix)
         run: |
           mkdir -p ${{ env.BENCHMARK_RESULTS_DIR }}
           ./build/bench_statistical --json > ${{ env.BENCHMARK_RESULTS_DIR }}/${{ matrix.os }}-${{ matrix.compiler }}-${{ matrix.arch }}-statistical.json
         shell: bash
+        if: runner.os != 'Windows'
+
+      - name: Run statistical benchmarks (Windows)
+        run: |
+          mkdir -p ${{ env.BENCHMARK_RESULTS_DIR }}
+          ./build/Release/bench_statistical.exe --json > ${{ env.BENCHMARK_RESULTS_DIR }}/${{ matrix.os }}-${{ matrix.compiler }}-${{ matrix.arch }}-statistical.json
+        shell: bash
+        if: runner.os == 'Windows'
 
       - name: Run corpus benchmarks
         run: ./build/bench_corpus
         if: (github.event.inputs.full_suite == 'true' || github.event_name == 'schedule') && runner.os != 'Windows'
 
-      - name: Run pattern benchmarks
+      - name: Run pattern benchmarks (Unix)
         run: ./build/bench_patterns
-        if: github.event.inputs.full_suite == 'true' || github.event_name == 'schedule'
+        if: (github.event.inputs.full_suite == 'true' || github.event_name == 'schedule') && runner.os != 'Windows'
+
+      - name: Run pattern benchmarks (Windows)
+        run: ./build/Release/bench_patterns.exe
+        if: (github.event.inputs.full_suite == 'true' || github.event_name == 'schedule') && runner.os == 'Windows'
 
       - name: Upload benchmark results
         uses: actions/upload-artifact@v4
