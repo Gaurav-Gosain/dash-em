@@ -1361,15 +1361,17 @@ static int dashem_remove_avx512_compress(
             continue;
         }
 
+        /* CRITICAL: Filter out em-dashes that start at positions 62-63
+         * These would span beyond the 64-byte chunk and cause incorrect masking.
+         * We'll process them in the next iteration or scalar fallback. */
+        em_dash_start &= 0x3FFFFFFFFFFFFFFFULL;  /* Clear bits 62-63 */
+
         /* Create mask for bytes to KEEP (exclude em-dash bytes) */
         __mmask64 keep_mask = ~em_dash_start;  /* Exclude first byte of em-dash */
 
         /* Also exclude bytes 2 and 3 of each em-dash */
-        /* CRITICAL FIX: Prevent bit overflow at positions 62-63 */
-        /* When em-dash starts at position 62, byte2 would overflow into bit 64 */
-        /* When em-dash starts at position 63, both byte2 and byte3 would overflow */
-        __mmask64 em_dash_byte2 = (em_dash_start << 1) & 0xFFFFFFFFFFFFFFFEULL;  /* Mask out overflow bit */
-        __mmask64 em_dash_byte3 = (em_dash_start << 2) & 0xFFFFFFFFFFFFFFFCULL;  /* Mask out overflow bits */
+        __mmask64 em_dash_byte2 = em_dash_start << 1;  /* Safe now - no em-dashes at 62-63 */
+        __mmask64 em_dash_byte3 = em_dash_start << 2;
 
         /* Mask out all 3 bytes of each em-dash */
         keep_mask &= ~em_dash_byte2;
