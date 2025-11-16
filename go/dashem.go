@@ -7,10 +7,8 @@ The underlying C implementation uses SIMD optimizations for maximum performance.
 package dashem
 
 /*
-#cgo CFLAGS: -O3 -I${SRCDIR}/../src
-#cgo LDFLAGS: -L${SRCDIR}/../build -ldashem_static
-
-#include "dashem.h"
+#cgo CFLAGS: -O3 -I${SRCDIR}
+#include "dashem.c"
 #include <stdlib.h>
 #include <string.h>
 */
