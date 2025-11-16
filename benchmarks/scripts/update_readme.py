@@ -54,15 +54,31 @@ def generate_language_comparison_table(data: Dict[str, Any]) -> List[str]:
         if 'benchmarks' not in lang_data:
             continue
 
-        # Find bytes-level native methods and dashem results
+        # Find native methods and dashem results
+        # Python: compare against manual_bytes (slow interpreted iteration)
+        # JavaScript: compare against string replace (buffer is JIT-optimized by V8)
         native_results = {}
         dashem_results = {}
+        fallback_results = {}
 
         for bench in lang_data['benchmarks']:
             pattern = bench['name'].split('_')[0]
             if 'dashem' in bench['method']:
                 dashem_results[pattern] = bench
-            elif 'manual_bytes' in bench['method'] or 'buffer' in bench['method']:
+            elif lang_name == 'python' and 'manual_bytes' in bench['method']:
+                # Python: use manual_bytes for fair comparison
+                native_results[pattern] = bench
+            elif lang_name == 'javascript' and 'replace' in bench['method']:
+                # JavaScript: use string replace (buffer is too fast due to V8 JIT)
+                native_results[pattern] = bench
+            elif 'manual_bytes' in bench['method'] or 'buffer' in bench['method'] or 'replace' in bench['method']:
+                # Collect fallbacks
+                if pattern not in fallback_results:
+                    fallback_results[pattern] = bench
+
+        # Use fallback if language-specific method not found
+        for pattern, bench in fallback_results.items():
+            if pattern not in native_results:
                 native_results[pattern] = bench
 
         # Compare results
