@@ -133,7 +133,7 @@ def generate_language_comparison(data: Dict[str, Any]) -> List[str]:
             continue
 
         # Find pairs of native and dashem results
-        # Prefer manual_bytes for fairer comparison (both operate on bytes)
+        # Prefer bytes-level methods for fairer comparison
         native_results = {}
         dashem_results = {}
         str_replace_results = {}
@@ -142,12 +142,13 @@ def generate_language_comparison(data: Dict[str, Any]) -> List[str]:
             pattern = bench['name'].split('_')[0]
             if 'dashem' in bench['method']:
                 dashem_results[pattern] = bench
-            elif 'manual_bytes' in bench['method']:
-                native_results[pattern] = bench  # Prefer bytes-level comparison
-            elif 'str_replace' in bench['method']:
-                str_replace_results[pattern] = bench  # Fallback to str_replace
+            elif 'manual_bytes' in bench['method'] or 'buffer' in bench['method']:
+                # Prefer bytes-level comparison (manual_bytes for Python, buffer for JS)
+                native_results[pattern] = bench
+            elif 'str_replace' in bench['method'] or 'replace' in bench['method']:
+                str_replace_results[pattern] = bench  # Fallback to string replace
 
-        # Use str_replace as fallback if manual_bytes not available
+        # Use string replace as fallback if bytes-level not available
         for pattern, bench in str_replace_results.items():
             if pattern not in native_results:
                 native_results[pattern] = bench
