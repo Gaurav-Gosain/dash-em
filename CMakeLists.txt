@@ -211,9 +211,49 @@ add_test(NAME FuzzingTests COMMAND fuzzer)
 # Benchmarks
 # ============================================================================
 
+# Original benchmark
 add_executable(bench_dashem benchmarks/bench_dashem.c)
 target_link_libraries(bench_dashem PRIVATE dashem_static)
 target_include_directories(bench_dashem PRIVATE src)
+
+# Statistical benchmark with percentile analysis
+add_executable(bench_statistical benchmarks/bench_statistical.c)
+target_link_libraries(bench_statistical PRIVATE dashem_static m)
+target_include_directories(bench_statistical PRIVATE src)
+
+# Real-world corpus benchmark
+add_executable(bench_corpus benchmarks/bench_corpus.c)
+target_link_libraries(bench_corpus PRIVATE dashem_static)
+target_include_directories(bench_corpus PRIVATE src)
+
+# Pattern-specific benchmark
+add_executable(bench_patterns benchmarks/bench_patterns.c)
+target_link_libraries(bench_patterns PRIVATE dashem_static m)
+target_include_directories(bench_patterns PRIVATE src)
+
+# Add benchmark option to control building
+option(BUILD_BENCHMARKS "Build benchmark suite" ON)
+
+if(BUILD_BENCHMARKS)
+    # Group all benchmarks
+    set(BENCHMARK_TARGETS
+        bench_dashem
+        bench_statistical
+        bench_corpus
+        bench_patterns
+    )
+
+    # Add custom target for running all benchmarks
+    add_custom_target(run_benchmarks
+        COMMAND bench_dashem
+        COMMAND bench_statistical
+        COMMAND bench_corpus
+        COMMAND bench_patterns
+        DEPENDS ${BENCHMARK_TARGETS}
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+        COMMENT "Running all benchmarks"
+    )
+endif()
 
 # ============================================================================
 # Installation

@@ -1,0 +1,382 @@
+name: Multi-Architecture Benchmarks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Run nightly at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      full_suite:
+        description: 'Run full benchmark suite'
+        required: false
+        default: 'false'
+        type: boolean
+
+env:
+  BENCHMARK_RESULTS_BRANCH: benchmark-results
+  BENCHMARK_RESULTS_DIR: benchmarks/results
+
+jobs:
+  # x86_64 Architectures
+  benchmark-x86-64:
+    name: Benchmark x86_64 - ${{ matrix.os }} - ${{ matrix.compiler }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          # Linux x86_64 variants
+          - os: ubuntu-22.04
+            runner: ubuntu-22.04
+            compiler: gcc-12
+            arch: x86_64
+            features: "AVX2,SSE4.2"
+
+          - os: ubuntu-22.04
+            runner: ubuntu-22.04
+            compiler: clang-15
+            arch: x86_64
+            features: "AVX2,SSE4.2"
+
+          # macOS x86_64
+          - os: macos-12
+            runner: macos-12
+            compiler: clang
+            arch: x86_64
+            features: "AVX2,SSE4.2"
+
+          # Windows x86_64
+          - os: windows-2022
+            runner: windows-2022
+            compiler: msvc
+            arch: x86_64
+            features: "AVX2,SSE4.2"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup build environment
+        run: |
+          if [ "${{ matrix.os }}" = "ubuntu-22.04" ]; then
+            if [ "${{ matrix.compiler }}" = "gcc-12" ]; then
+              sudo apt-get update
+              sudo apt-get install -y gcc-12 g++-12
+              echo "CC=gcc-12" >> $GITHUB_ENV
+              echo "CXX=g++-12" >> $GITHUB_ENV
+            else
+              sudo apt-get update
+              sudo apt-get install -y clang-15
+              echo "CC=clang-15" >> $GITHUB_ENV
+              echo "CXX=clang++-15" >> $GITHUB_ENV
+            fi
+          fi
+        shell: bash
+        if: matrix.os == 'ubuntu-22.04'
+
+      - name: Configure CMake
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_BENCHMARKS=ON \
+            -DENABLE_LTO=ON
+        shell: bash
+
+      - name: Build benchmarks
+        run: cmake --build build --config Release --target bench_statistical bench_corpus bench_patterns
+
+      - name: Run statistical benchmarks
+        run: |
+          mkdir -p ${{ env.BENCHMARK_RESULTS_DIR }}
+          ./build/bench_statistical --json > ${{ env.BENCHMARK_RESULTS_DIR }}/${{ matrix.os }}-${{ matrix.compiler }}-${{ matrix.arch }}-statistical.json
+        shell: bash
+
+      - name: Run corpus benchmarks
+        run: ./build/bench_corpus
+        if: github.event.inputs.full_suite == 'true' || github.event_name == 'schedule'
+
+      - name: Run pattern benchmarks
+        run: ./build/bench_patterns
+        if: github.event.inputs.full_suite == 'true' || github.event_name == 'schedule'
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v3
+        with:
+          name: benchmark-results-${{ matrix.os }}-${{ matrix.compiler }}-${{ matrix.arch }}
+          path: ${{ env.BENCHMARK_RESULTS_DIR }}/*.json
+
+  # ARM64 Architectures
+  benchmark-arm64:
+    name: Benchmark ARM64 - ${{ matrix.os }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          # Apple Silicon M1/M2
+          - os: macos-14
+            runner: macos-14
+            arch: aarch64
+            features: "NEON"
+
+          # Linux ARM64 (if self-hosted runners available)
+          # Uncomment when self-hosted ARM runners are available
+          # - os: ubuntu-arm64
+          #   runner: [self-hosted, linux, ARM64]
+          #   arch: aarch64
+          #   features: "NEON"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure CMake
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_BENCHMARKS=ON \
+            -DENABLE_LTO=ON
+
+      - name: Build benchmarks
+        run: cmake --build build --config Release --target bench_statistical bench_corpus bench_patterns
+
+      - name: Run statistical benchmarks
+        run: |
+          mkdir -p ${{ env.BENCHMARK_RESULTS_DIR }}
+          ./build/bench_statistical --json > ${{ env.BENCHMARK_RESULTS_DIR }}/${{ matrix.os }}-${{ matrix.arch }}-statistical.json
+
+      - name: Run corpus benchmarks
+        run: ./build/bench_corpus
+        if: github.event.inputs.full_suite == 'true' || github.event_name == 'schedule'
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v3
+        with:
+          name: benchmark-results-${{ matrix.os }}-${{ matrix.arch }}
+          path: ${{ env.BENCHMARK_RESULTS_DIR }}/*.json
+
+  # Language comparison benchmarks
+  language-comparisons:
+    name: Language Comparisons - ${{ matrix.language }}
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        language: [python, javascript, go, rust]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        if: matrix.language == 'python'
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Setup Node.js
+        if: matrix.language == 'javascript'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Go
+        if: matrix.language == 'go'
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+
+      - name: Setup Rust
+        if: matrix.language == 'rust'
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+
+      - name: Build dash-em library
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release
+
+      - name: Build and install language binding
+        run: |
+          case "${{ matrix.language }}" in
+            python)
+              cd bindings/python
+              pip install -e .
+              cd ../..
+              ;;
+            javascript)
+              cd bindings/node
+              npm install
+              npm run build
+              cd ../..
+              ;;
+            go)
+              cd bindings/go
+              go build
+              cd ../..
+              ;;
+            rust)
+              cd bindings/rust
+              cargo build --release
+              cd ../..
+              ;;
+          esac
+
+      - name: Run language benchmarks
+        run: |
+          mkdir -p ${{ env.BENCHMARK_RESULTS_DIR }}
+          case "${{ matrix.language }}" in
+            python)
+              python benchmarks/comparisons/python/bench_python.py --json > \
+                ${{ env.BENCHMARK_RESULTS_DIR }}/language-${{ matrix.language }}.json
+              ;;
+            javascript)
+              node benchmarks/comparisons/javascript/bench_javascript.js --json > \
+                ${{ env.BENCHMARK_RESULTS_DIR }}/language-${{ matrix.language }}.json
+              ;;
+            go)
+              cd benchmarks/comparisons/go
+              go run bench_go.go -json > \
+                ../${{ env.BENCHMARK_RESULTS_DIR }}/language-${{ matrix.language }}.json
+              ;;
+            rust)
+              cd benchmarks/comparisons/rust
+              cargo run --release -- --json > \
+                ../${{ env.BENCHMARK_RESULTS_DIR }}/language-${{ matrix.language }}.json
+              ;;
+          esac
+
+      - name: Upload language comparison results
+        uses: actions/upload-artifact@v3
+        with:
+          name: language-comparison-${{ matrix.language }}
+          path: ${{ env.BENCHMARK_RESULTS_DIR }}/*.json
+
+  # Analyze and update results
+  analyze-results:
+    name: Analyze and Update Results
+    needs: [benchmark-x86-64, benchmark-arm64, language-comparisons]
+    runs-on: ubuntu-22.04
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install pandas numpy matplotlib seaborn jinja2
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: artifacts/
+
+      - name: Aggregate results
+        run: |
+          python benchmarks/scripts/aggregate_results.py \
+            --input artifacts/ \
+            --output ${{ env.BENCHMARK_RESULTS_DIR }}/latest.json
+
+      - name: Generate performance report
+        run: |
+          python benchmarks/scripts/generate_report.py \
+            --input ${{ env.BENCHMARK_RESULTS_DIR }}/latest.json \
+            --output ${{ env.BENCHMARK_RESULTS_DIR }}/report.md
+
+      - name: Update README performance table
+        run: |
+          python benchmarks/scripts/update_readme.py \
+            --results ${{ env.BENCHMARK_RESULTS_DIR }}/latest.json \
+            --readme README.md
+
+      - name: Commit and push results
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+
+          # Create results branch if it doesn't exist
+          git checkout -B ${{ env.BENCHMARK_RESULTS_BRANCH }}
+
+          # Copy results to historical directory
+          TIMESTAMP=$(date +%Y-%m-%d-%H%M%S)
+          mkdir -p ${{ env.BENCHMARK_RESULTS_DIR }}/history/${TIMESTAMP}
+          cp ${{ env.BENCHMARK_RESULTS_DIR }}/latest.json \
+             ${{ env.BENCHMARK_RESULTS_DIR }}/history/${TIMESTAMP}/
+
+          # Add and commit
+          git add ${{ env.BENCHMARK_RESULTS_DIR }}
+          git add README.md
+          git commit -m "Update benchmark results - ${TIMESTAMP}" || true
+
+          # Push to results branch
+          git push origin ${{ env.BENCHMARK_RESULTS_BRANCH }} --force
+
+      - name: Create benchmark badge
+        run: |
+          # Extract key metric for badge
+          THROUGHPUT=$(jq -r '.benchmarks[0].throughput_gbps.mean' ${{ env.BENCHMARK_RESULTS_DIR }}/latest.json)
+          echo "THROUGHPUT=${THROUGHPUT}" >> $GITHUB_ENV
+
+          # Create badge JSON
+          cat > badge.json <<EOF
+          {
+            "schemaVersion": 1,
+            "label": "Throughput",
+            "message": "${THROUGHPUT} GB/s",
+            "color": "brightgreen"
+          }
+          EOF
+
+      - name: Comment on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync('${{ env.BENCHMARK_RESULTS_DIR }}/report.md', 'utf8');
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## Benchmark Results\n\n${report}`
+            });
+
+  # Performance regression check
+  regression-check:
+    name: Performance Regression Check
+    needs: [benchmark-x86-64]
+    runs-on: ubuntu-22.04
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download current results
+        uses: actions/download-artifact@v3
+        with:
+          name: benchmark-results-ubuntu-22.04-gcc-12-x86_64
+
+      - name: Fetch baseline results
+        run: |
+          # Fetch baseline from main branch
+          git fetch origin main
+          git checkout origin/main -- ${{ env.BENCHMARK_RESULTS_DIR }}/latest.json || echo "No baseline found"
+
+      - name: Check for regressions
+        run: |
+          if [ -f "${{ env.BENCHMARK_RESULTS_DIR }}/latest.json" ]; then
+            python benchmarks/scripts/check_regression.py \
+              --baseline ${{ env.BENCHMARK_RESULTS_DIR }}/latest.json \
+              --current benchmark-results-ubuntu-22.04-gcc-12-x86_64/ubuntu-22.04-gcc-12-x86_64-statistical.json \
+              --threshold 5.0
+          else
+            echo "No baseline results found, skipping regression check"
+          fi

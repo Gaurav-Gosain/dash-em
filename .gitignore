@@ -55,3 +55,11 @@ Thumbs.db
 # Dependencies
 venv/
 .env
+
+# Benchmark artifacts
+benchmarks/corpus/
+benchmarks/results/
+benchmarks/**/*.json
+bench_statistical
+bench_corpus
+bench_patterns
