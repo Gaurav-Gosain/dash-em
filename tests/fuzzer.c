@@ -216,7 +216,9 @@ int main(void) {
     int failed = 0;
 
     /* Seed with time for non-deterministic testing */
-    uint32_t seed = (uint32_t)time(NULL);
+    /* Use fixed seed for reproducible CI tests, or time-based for local fuzzing */
+    const char* env_seed = getenv("DASHEM_FUZZ_SEED");
+    uint32_t seed = env_seed ? (uint32_t)atoi(env_seed) : (uint32_t)time(NULL);
 
     for (int i = 0; i < NUM_FUZZ_ITERATIONS; i++) {
         if ((i + 1) % 100 == 0) {

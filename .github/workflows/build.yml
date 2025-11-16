@@ -46,6 +46,8 @@ jobs:
       - name: Run Tests
         run: ctest --verbose -C Release
         working-directory: build
+        env:
+          DASHEM_FUZZ_SEED: 12345  # Fixed seed for reproducible fuzzing in CI
 
   build-node:
     name: Build Node.js Binding
