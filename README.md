@@ -15,7 +15,7 @@ Building upon decades of accumulated wisdom in systems programming—combined wi
 ### Key Value Propositions
 
 - ⚡ **SIMD-Accelerated Processing** — Employing SSE4.2, AVX, AVX2, AVX-512F, and ARM NEON instruction sets for—optimal throughput
-- 🚀 **Extraordinary Performance** — Up to **1000x faster** than naive string.replace()—implementations
+- 🚀 **Extraordinary Performance** — Up to **538x faster** than byte-level iteration—in language bindings
 - 🔒 **Memory-Safe Architecture** — Engineered with defensive programming—paradigms throughout
 - 📦 **Zero External Dependencies** — Pure C implementation—no transitive dependency chains
 - 🌍 **True Cross-Platform Support** — Linux, macOS, Windows—and ARM-based systems—all supported
@@ -30,10 +30,11 @@ Building upon decades of accumulated wisdom in systems programming—combined wi
 
 Instead of checking characters one by one—which is slow—dash-em uses SIMD instructions to process 16–64 bytes in parallel. Modern CPUs can do this crazy fast—we just have to tell them what to do.
 
-**Real-world speedups** (measured on actual hardware):
-- Small strings (1.4 KB): **1.79x faster** than naive approach
-- Medium strings (14 KB): **1.79x faster**
-- Large strings (140 KB): **2.02x faster**
+**Real-world speedups** (measured across multiple architectures):
+- **Core C library**: 5x-11x faster than scalar implementation—depending on CPU architecture
+- **Python bindings**: 211x-538x faster than byte-level iteration
+- **JavaScript bindings**: 2x-31x faster than byte-level Buffer manipulation
+- **Best case** (no em-dashes—fast path): Up to **15.58 GB/s throughput** on modern x86-64
 
 ### How it works
 
@@ -457,4 +458,4 @@ This project exists because—em-dashes matter—and they deserve—the most eff
 
 ---
 
-**Version:** 1.0.0 | **Status:** Production-Ready | **License:** MIT | **Repository:** [github.com/Gaurav-Gosain/dash-em](https://github.com/Gaurav-Gosain/dash-em)
+**Version:** 1.0.1 | **Status:** Production-Ready | **License:** MIT | **Repository:** [github.com/Gaurav-Gosain/dash-em](https://github.com/Gaurav-Gosain/dash-em)
