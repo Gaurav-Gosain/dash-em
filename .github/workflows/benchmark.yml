@@ -343,9 +343,8 @@ jobs:
             echo "No README changes to push to main"
           else
             git add README.md
-            git commit -m "docs: Update benchmark results in README [skip ci]
-
-Auto-updated from benchmark workflow - ${TIMESTAMP}"
+            git commit -m "docs: Update benchmark results in README [skip ci]" \
+                       -m "Auto-updated from benchmark workflow - ${TIMESTAMP}"
             git push origin main
           fi
 
