@@ -55,8 +55,8 @@ def generate_language_comparison_table(data: Dict[str, Any]) -> List[str]:
             continue
 
         # Find native methods and dashem results
-        # Python: compare against manual_bytes (slow interpreted iteration)
-        # JavaScript: compare against string replace (buffer is JIT-optimized by V8)
+        # Python: compare against manual_bytes (byte-level iteration)
+        # JavaScript: compare against buffer (byte-level iteration, fair comparison)
         native_results = {}
         dashem_results = {}
         fallback_results = {}
@@ -66,10 +66,10 @@ def generate_language_comparison_table(data: Dict[str, Any]) -> List[str]:
             if 'dashem' in bench['method']:
                 dashem_results[pattern] = bench
             elif lang_name == 'python' and 'manual_bytes' in bench['method']:
-                # Python: use manual_bytes for fair comparison
+                # Python: use manual_bytes (byte-level iteration)
                 native_results[pattern] = bench
-            elif lang_name == 'javascript' and 'replace' in bench['method']:
-                # JavaScript: use string replace (buffer is too fast due to V8 JIT)
+            elif lang_name == 'javascript' and 'buffer' in bench['method']:
+                # JavaScript: use buffer (byte-level iteration, not V8-optimized string.replace)
                 native_results[pattern] = bench
             elif 'manual_bytes' in bench['method'] or 'buffer' in bench['method'] or 'replace' in bench['method']:
                 # Collect fallbacks
