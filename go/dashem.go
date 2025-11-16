@@ -8,7 +8,7 @@ package dashem
 
 /*
 #cgo CFLAGS: -O3 -I${SRCDIR}
-#include "dashem.c"
+#include "dashem.h"
 #include <stdlib.h>
 #include <string.h>
 */
