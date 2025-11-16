@@ -32,9 +32,11 @@
 #if defined(_MSC_VER)
     /* MSVC doesn't support __attribute__ */
     #define DASHEM_UNUSED
+    #define DASHEM_ALWAYS_INLINE __forceinline
 #else
     /* GCC/Clang: use attribute to suppress unused warning */
     #define DASHEM_UNUSED __attribute__((unused))
+    #define DASHEM_ALWAYS_INLINE __attribute__((always_inline)) inline
 #endif
 
 /* ============================================================================
@@ -254,6 +256,9 @@ uint32_t dashem_detect_cpu_features(void) {
 }
 
 /* Forward declarations for implementation functions */
+#if defined(__AVX512VBMI2__) && defined(__AVX512BW__)
+static int dashem_remove_avx512_compress(const char*, size_t, char*, size_t, size_t*);
+#endif
 #if defined(__AVX2__)
 static int dashem_remove_avx2(const char*, size_t, char*, size_t, size_t*);
 static int dashem_remove_avx2_twopass(const char*, size_t, char*, size_t, size_t*);
@@ -1850,7 +1855,7 @@ static DASHEM_UNUSED int process_utf8_char(
  * When input and output buffers are the same, we can use a more efficient
  * algorithm that avoids unnecessary copying. This provides 15-25% speedup.
  */
-static inline int __attribute__((always_inline)) dashem_remove_insitu(
+static DASHEM_ALWAYS_INLINE int dashem_remove_insitu(
     const char *buffer,
     size_t input_len,
     size_t *output_len
