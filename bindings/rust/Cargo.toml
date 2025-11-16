@@ -1,14 +1,14 @@
 [package]
 name = "dash-em"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
-authors = ["Gaurav Gosain"]
+authors = ["Gaurav Gosain <itsgauravgosain@gmail.com>"]
 license = "MIT"
 description = "Enterprise-Grade Em-Dash Removal Library — SIMD-Accelerated String Processing"
 keywords = ["em-dash", "string", "simd", "performance"]
 categories = ["text-processing", "algorithms"]
 repository = "https://github.com/Gaurav-Gosain/dash-em"
-homepage = "https://github.com/Gaurav-Gosain/dash-em"
+homepage = "https://github.com/Gaurav-Gosain/dash-em#readme"
 readme = "../../README.md"
 include = [
     "Cargo.toml",
