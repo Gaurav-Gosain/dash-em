@@ -237,12 +237,12 @@ jobs:
             go)
               cd benchmarks/comparisons/go
               go run bench_go.go -json > \
-                ../${{ env.BENCHMARK_RESULTS_DIR }}/language-${{ matrix.language }}.json
+                ../../../${{ env.BENCHMARK_RESULTS_DIR }}/language-${{ matrix.language }}.json
               ;;
             rust)
               cd benchmarks/comparisons/rust
               cargo run --release -- --json > \
-                ../${{ env.BENCHMARK_RESULTS_DIR }}/language-${{ matrix.language }}.json
+                ../../../${{ env.BENCHMARK_RESULTS_DIR }}/language-${{ matrix.language }}.json
               ;;
           esac
 

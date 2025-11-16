@@ -218,7 +218,10 @@ target_include_directories(bench_dashem PRIVATE src)
 
 # Statistical benchmark with percentile analysis
 add_executable(bench_statistical benchmarks/bench_statistical.c)
-target_link_libraries(bench_statistical PRIVATE dashem_static m)
+target_link_libraries(bench_statistical PRIVATE dashem_static)
+if(UNIX)
+    target_link_libraries(bench_statistical PRIVATE m)
+endif()
 target_include_directories(bench_statistical PRIVATE src)
 
 # Real-world corpus benchmark
@@ -228,7 +231,10 @@ target_include_directories(bench_corpus PRIVATE src)
 
 # Pattern-specific benchmark
 add_executable(bench_patterns benchmarks/bench_patterns.c)
-target_link_libraries(bench_patterns PRIVATE dashem_static m)
+target_link_libraries(bench_patterns PRIVATE dashem_static)
+if(UNIX)
+    target_link_libraries(bench_patterns PRIVATE m)
+endif()
 target_include_directories(bench_patterns PRIVATE src)
 
 # Add benchmark option to control building
