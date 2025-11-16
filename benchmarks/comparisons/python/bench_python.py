@@ -24,7 +24,7 @@ import argparse
 try:
     # Add the build directory to path for testing
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../../bindings/python'))
-    import dashem
+    import dashem_native  # Use native C extension directly for better performance
     DASHEM_AVAILABLE = True
 except ImportError:
     DASHEM_AVAILABLE = False
@@ -154,10 +154,9 @@ def remove_emdash_dashem(data: bytes) -> bytes:
     """Remove em-dashes using dash-em binding."""
     if not DASHEM_AVAILABLE:
         raise ImportError("dash-em not available")
-    # dashem.remove() expects str and returns str, so decode/encode
-    text = data.decode('utf-8')
-    result = dashem.remove(text)
-    return result.encode('utf-8')
+    # Call native C extension directly - it accepts bytes and returns str
+    result_str = dashem_native.remove(data)
+    return result_str.encode('utf-8')
 
 
 def count_emdashes(text: str) -> int:
