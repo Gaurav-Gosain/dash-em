@@ -1656,38 +1656,36 @@ static int dashem_remove_neon(
     const uint8x16_t pattern_0x80 = vdupq_n_u8(0x80);
     const uint8x16_t pattern_0x94 = vdupq_n_u8(0x94);
 
-    /* === 64-byte unrolled fast path === */
-    while (i + 64 <= input_len) {
-        uint8x16_t v0 = vld1q_u8(in_ptr + i);
-        uint8x16_t v1 = vld1q_u8(in_ptr + i + 16);
-        uint8x16_t v2 = vld1q_u8(in_ptr + i + 32);
-        uint8x16_t v3 = vld1q_u8(in_ptr + i + 48);
+    /* Main processing loop */
+    while (i + 18 <= input_len) {
+        /* === 64-byte unrolled fast path === */
+        while (i + 64 <= input_len) {
+            uint8x16_t va = vld1q_u8(in_ptr + i);
+            uint8x16_t vb = vld1q_u8(in_ptr + i + 16);
+            uint8x16_t vc = vld1q_u8(in_ptr + i + 32);
+            uint8x16_t vd = vld1q_u8(in_ptr + i + 48);
 
-        uint8x16_t c0 = vceqq_u8(v0, pattern_0xe2);
-        uint8x16_t c1 = vceqq_u8(v1, pattern_0xe2);
-        uint8x16_t c2 = vceqq_u8(v2, pattern_0xe2);
-        uint8x16_t c3 = vceqq_u8(v3, pattern_0xe2);
+            uint8x16_t ca = vceqq_u8(va, pattern_0xe2);
+            uint8x16_t cb = vceqq_u8(vb, pattern_0xe2);
+            uint8x16_t cc = vceqq_u8(vc, pattern_0xe2);
+            uint8x16_t cd = vceqq_u8(vd, pattern_0xe2);
 
-        /* Check all 64 bytes for 0xE2 at once */
-        uint8x16_t any = vorrq_u8(vorrq_u8(c0, c1), vorrq_u8(c2, c3));
+            uint8x16_t any = vorrq_u8(vorrq_u8(ca, cb), vorrq_u8(cc, cd));
 
-        if (LIKELY(!neon_any_nonzero(any))) {
-            /* No 0xE2 in 64 bytes — bulk copy */
-            vst1q_u8(out_ptr + out_idx, v0);
-            vst1q_u8(out_ptr + out_idx + 16, v1);
-            vst1q_u8(out_ptr + out_idx + 32, v2);
-            vst1q_u8(out_ptr + out_idx + 48, v3);
-            out_idx += 64;
-            i += 64;
-            continue;
+            if (LIKELY(!neon_any_nonzero(any))) {
+                vst1q_u8(out_ptr + out_idx, va);
+                vst1q_u8(out_ptr + out_idx + 16, vb);
+                vst1q_u8(out_ptr + out_idx + 32, vc);
+                vst1q_u8(out_ptr + out_idx + 48, vd);
+                out_idx += 64;
+                i += 64;
+                continue;
+            }
+            break;
         }
 
-        /* 0xE2 found somewhere in 64 bytes — fall to per-chunk loop */
-        break;
-    }
-
-    /* === 16-byte per-chunk loop === */
-    while (i + 18 <= input_len) {
+        /* === 16-byte per-chunk with match processing === */
+        if (i + 18 > input_len) break;
         uint8x16_t v0 = vld1q_u8(in_ptr + i);
 
         /* Cheap early-out: check for 0xE2 using lane extraction (2 ops vs 8+ for movemask) */
@@ -1706,7 +1704,15 @@ static int dashem_remove_neon(
         uint8x16_t cmp2 = vceqq_u8(v2, pattern_0x94);
         uint8x16_t full_match = vandq_u8(cmp0, vandq_u8(cmp1, cmp2));
 
-        if (LIKELY(!neon_any_nonzero(full_match))) {
+        /* Extract match positions from 64-bit lanes.
+         * vceqq_u8 produces 0xFF per matching byte, so each lane is a
+         * uint64 with 0xFF at match positions and 0x00 elsewhere.
+         * Use CTZ on the 64-bit values to find match byte positions directly,
+         * avoiding both the expensive neon_movemask and the 16-branch scan. */
+        uint64_t lo = vgetq_lane_u64(vreinterpretq_u64_u8(full_match), 0);
+        uint64_t hi = vgetq_lane_u64(vreinterpretq_u64_u8(full_match), 1);
+
+        if (LIKELY((lo | hi) == 0)) {
             /* 0xE2 present but no complete em-dash */
             vst1q_u8(out_ptr + out_idx, v0);
             out_idx += 16;
@@ -1714,23 +1720,35 @@ static int dashem_remove_neon(
             continue;
         }
 
-        /* Store match result to memory and scan — avoids expensive neon_movemask.
-         * This is faster on ARM than bitmask extraction + CTZ for all densities. */
-        uint8_t match_bytes[16];
-        vst1q_u8(match_bytes, full_match);
-
+        /* Process matches via CTZ on 64-bit lane values */
         size_t wp = i;
-        for (int j = 0; j < 16; j++) {
-            if (match_bytes[j]) {
-                size_t match_pos = i + (size_t)j;
-                /* Copy gap before this match */
-                if (match_pos > wp) {
-                    memcpy(out_ptr + out_idx, in_ptr + wp, match_pos - wp);
-                    out_idx += match_pos - wp;
-                }
-                wp = match_pos + 3;
-                j += 2;  /* Skip the 0x80 and 0x94 bytes */
+
+        /* Process low 8 bytes (positions 0-7) */
+        while (lo != 0) {
+            int bit_pos = (int)dashem_ctzll(lo);
+            int byte_pos = bit_pos >> 3;
+            size_t match_pos = i + (size_t)byte_pos;
+
+            if (match_pos > wp) {
+                memcpy(out_ptr + out_idx, in_ptr + wp, match_pos - wp);
+                out_idx += match_pos - wp;
             }
+            wp = match_pos + 3;
+            lo &= ~((uint64_t)0xFF << bit_pos);  /* Clear this match byte */
+        }
+
+        /* Process high 8 bytes (positions 8-15) */
+        while (hi != 0) {
+            int bit_pos = (int)dashem_ctzll(hi);
+            int byte_pos = bit_pos >> 3;
+            size_t match_pos = i + 8 + (size_t)byte_pos;
+
+            if (match_pos > wp) {
+                memcpy(out_ptr + out_idx, in_ptr + wp, match_pos - wp);
+                out_idx += match_pos - wp;
+            }
+            wp = match_pos + 3;
+            hi &= ~((uint64_t)0xFF << bit_pos);
         }
 
         /* Copy remainder of chunk and advance */
