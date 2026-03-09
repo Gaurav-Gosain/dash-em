@@ -1929,7 +1929,7 @@ int dashem_remove(
 }
 
 const char* dashem_version(void) {
-    return "1.1.1";
+    return "1.1.2";
 }
 
 const char* dashem_implementation_name(void) {
