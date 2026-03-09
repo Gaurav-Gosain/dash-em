@@ -24,7 +24,7 @@ extern "C" {
  */
 #define DASHEM_VERSION_MAJOR 1
 #define DASHEM_VERSION_MINOR 1
-#define DASHEM_VERSION_PATCH 0
+#define DASHEM_VERSION_PATCH 1
 
 /**
  * @brief Em-dash character (U+2014) in UTF-8
