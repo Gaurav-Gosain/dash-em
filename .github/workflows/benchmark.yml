@@ -345,7 +345,7 @@ jobs:
           git checkout ${{ env.BENCHMARK_RESULTS_BRANCH }} -- README.md
 
           # Commit and push to main
-          if git diff --quiet README.md; then
+          if git diff --quiet HEAD -- README.md; then
             echo "No README changes to push to main"
           else
             git add README.md
