@@ -197,38 +197,20 @@ def update_readme(readme_path: Path, results_path: Path) -> bool:
 
     new_table = "\n".join(new_table_lines)
 
-    # Find and replace performance section
-    # Look for markers or headings
-    perf_section_pattern = r'(##\s+Performance.*?\n)(.*?)((?=\n##)|$)'
-    perf_table_pattern = r'(\|\s*Test.*?\|\s*\n\|[-\s|]+\n(?:\|.*?\|\s*\n)*)'
+    # Find and replace the entire Performance section (from ## Performance to next ##)
+    perf_section_pattern = r'(## Performance\s*\n)(.*?)(\n## )'
 
-    # Try to replace existing performance table
-    if re.search(perf_table_pattern, readme_content, re.MULTILINE | re.DOTALL):
-        # Replace existing table
-        updated_content = re.sub(
-            perf_table_pattern,
-            new_table,
-            readme_content,
-            count=1,
-            flags=re.MULTILINE | re.DOTALL
-        )
-    elif re.search(perf_section_pattern, readme_content, re.MULTILINE | re.DOTALL):
-        # Add table to performance section
-        def replace_section(match):
-            return match.group(1) + "\n" + new_table + "\n\n"
-
+    if re.search(perf_section_pattern, readme_content, re.DOTALL):
+        # Replace the entire performance section content
         updated_content = re.sub(
             perf_section_pattern,
-            replace_section,
+            r'\1' + "\n" + new_table + "\n" + r'\3',
             readme_content,
             count=1,
-            flags=re.MULTILINE | re.DOTALL
+            flags=re.DOTALL
         )
     else:
-        # Add new performance section
-        print("Warning: No performance section found in README, adding new section")
-
-        # Find a good place to insert (after introduction, before installation)
+        # Add new performance section before Installation
         insert_pattern = r'(##\s+Installation)'
 
         if re.search(insert_pattern, readme_content):
@@ -239,7 +221,6 @@ def update_readme(readme_path: Path, results_path: Path) -> bool:
                 count=1
             )
         else:
-            # Append to end
             updated_content = readme_content + f"\n\n## Performance\n\n{new_table}\n"
 
     # Add update timestamp
