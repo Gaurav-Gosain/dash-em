@@ -1434,46 +1434,57 @@ static int dashem_remove_sse42(
             continue;
         }
 
-        /* Process all potential em-dashes in this chunk */
-        size_t write_pos = i;  /* Track position we're copying from */
-        size_t processed = 0;  /* Track how many bits we've processed in the mask */
+        /* Choose strategy based on match density */
+        int match_count = DASHEM_POPCOUNT(em_dash_mask & 0xFFFF);
 
-        while (em_dash_mask != 0) {
-            /* Find the next set bit position within remaining mask */
-            int match_offset = dashem_ctz(em_dash_mask);  /* Position in remaining mask */
-            size_t match_pos = i + processed + match_offset;
+        if (LIKELY(match_count <= 2)) {
+            /* SPARSE: CTZ-based gap copying */
+            size_t wp = i;
+            uint32_t m = em_dash_mask;
+            while (m != 0) {
+                int bit = dashem_ctz(m);
+                size_t match_pos = i + bit;
 
-            /* Copy bytes before this match */
-            if (match_pos > write_pos) {
-                size_t copy_len = match_pos - write_pos;
-                memcpy(out_ptr + out_idx, input + write_pos, copy_len);
-                out_idx += copy_len;
+                if (match_pos > wp) {
+                    memcpy(out_ptr + out_idx, input + wp, match_pos - wp);
+                    out_idx += match_pos - wp;
+                }
+
+                wp = match_pos + 3;
+                m &= ~(1u << bit);
+                if (bit + 1 < 16) m &= ~(1u << (bit + 1));
+                if (bit + 2 < 16) m &= ~(1u << (bit + 2));
             }
 
-            /* Move past the em-dash (3 bytes) */
-            write_pos = match_pos + 3;
-            processed += match_offset + 3;
-
-            /* Remove processed bits from mask and continue.
-             * CRITICAL: Avoid undefined behavior when shift >= 32.
-             * Shifting a uint32_t by 32 or more bits is undefined in C. */
-            int shift_amount = match_offset + 3;
-            if (shift_amount >= 32) {
-                em_dash_mask = 0;  /* No more bits to process in this 32-byte chunk */
+            size_t chunk_end = i + 16;
+            if (wp <= chunk_end) {
+                if (wp < chunk_end) {
+                    memcpy(out_ptr + out_idx, input + wp, chunk_end - wp);
+                    out_idx += chunk_end - wp;
+                }
+                i = chunk_end;
             } else {
-                em_dash_mask >>= shift_amount;
+                i = wp;
+            }
+        } else {
+            /* DENSE: Mask-expansion + bit-extract */
+            uint32_t remove = em_dash_mask | (em_dash_mask << 1) | (em_dash_mask << 2);
+            uint32_t keep = (~remove) & 0xFFFF;
+
+            while (keep != 0) {
+                int pos = dashem_ctz(keep);
+                out_ptr[out_idx++] = in_ptr[i + pos];
+                keep &= keep - 1;
+            }
+
+            if (em_dash_mask & 0x8000u) {
+                i += 18;
+            } else if (em_dash_mask & 0x4000u) {
+                i += 17;
+            } else {
+                i += 16;
             }
         }
-
-        /* Copy any remaining bytes from this chunk */
-        size_t chunk_end = i + 16;
-        if (write_pos < chunk_end) {
-            size_t remaining = chunk_end - write_pos;
-            memcpy(out_ptr + out_idx, input + write_pos, remaining);
-            out_idx += remaining;
-        }
-
-        i = chunk_end;
     }
 
     /* Process remainder */
@@ -1618,36 +1629,11 @@ static int dashem_remove_bmi2(
 #if defined(__ARM_NEON)
     #include <arm_neon.h>
 
-/* Helper: extract a 16-bit bitmask from a NEON comparison result (one bit per byte) */
-static inline uint16_t neon_movemask(uint8x16_t v) {
-    /* Shift each byte so only the high bit remains, then narrow and extract */
-    static const uint8_t shift_vals[16] = {
-        1, 2, 4, 8, 16, 32, 64, 128,
-        1, 2, 4, 8, 16, 32, 64, 128
-    };
-    uint8x16_t shift = vld1q_u8(shift_vals);
-    uint8x16_t bits = vandq_u8(v, shift);
-    /* Pairwise add across lanes to collect bits */
-    uint8x8_t lo = vget_low_u8(bits);
-    uint8x8_t hi = vget_high_u8(bits);
-    uint8x8_t sum_lo = vpadd_u8(lo, lo);
-    sum_lo = vpadd_u8(sum_lo, sum_lo);
-    sum_lo = vpadd_u8(sum_lo, sum_lo);
-    uint8x8_t sum_hi = vpadd_u8(hi, hi);
-    sum_hi = vpadd_u8(sum_hi, sum_hi);
-    sum_hi = vpadd_u8(sum_hi, sum_hi);
-    return (uint16_t)vget_lane_u8(sum_lo, 0) | ((uint16_t)vget_lane_u8(sum_hi, 0) << 8);
-}
-
-/* CTZ for 16-bit mask */
-static inline int neon_ctz16(uint16_t v) {
-    /* Use 32-bit CTZ since we know v != 0 */
-    return dashem_ctz((uint32_t)v);
-}
-
-/* Popcount for 16-bit mask */
-static inline int neon_popcount16(uint16_t v) {
-    return DASHEM_POPCOUNT((uint32_t)v);
+/* Check if any byte in a NEON vector is non-zero (cheap: 2 lane extracts + 1 OR) */
+static inline int neon_any_nonzero(uint8x16_t v) {
+    uint64_t lo = vgetq_lane_u64(vreinterpretq_u64_u8(v), 0);
+    uint64_t hi = vgetq_lane_u64(vreinterpretq_u64_u8(v), 1);
+    return (lo | hi) != 0;
 }
 
 static int dashem_remove_neon(
@@ -1666,97 +1652,94 @@ static int dashem_remove_neon(
     const unsigned char *in_ptr = (const unsigned char *)input;
     unsigned char *out_ptr = (unsigned char *)output;
 
-    /* Create patterns for all 3 bytes of em-dash */
     const uint8x16_t pattern_0xe2 = vdupq_n_u8(0xE2);
     const uint8x16_t pattern_0x80 = vdupq_n_u8(0x80);
     const uint8x16_t pattern_0x94 = vdupq_n_u8(0x94);
 
-    /* Process 16 bytes at a time with NEON */
-    while (i + 18 <= input_len) {  /* +18 for overlapped loads at +1 and +2 */
-        uint8x16_t v0 = vld1q_u8((const uint8_t *)(input + i));
+    /* === 64-byte unrolled fast path === */
+    while (i + 64 <= input_len) {
+        uint8x16_t v0 = vld1q_u8(in_ptr + i);
+        uint8x16_t v1 = vld1q_u8(in_ptr + i + 16);
+        uint8x16_t v2 = vld1q_u8(in_ptr + i + 32);
+        uint8x16_t v3 = vld1q_u8(in_ptr + i + 48);
 
-        /* FAST PATH: Check for 0xE2 bytes first. If none, no em-dash is possible. */
+        uint8x16_t c0 = vceqq_u8(v0, pattern_0xe2);
+        uint8x16_t c1 = vceqq_u8(v1, pattern_0xe2);
+        uint8x16_t c2 = vceqq_u8(v2, pattern_0xe2);
+        uint8x16_t c3 = vceqq_u8(v3, pattern_0xe2);
+
+        /* Check all 64 bytes for 0xE2 at once */
+        uint8x16_t any = vorrq_u8(vorrq_u8(c0, c1), vorrq_u8(c2, c3));
+
+        if (LIKELY(!neon_any_nonzero(any))) {
+            /* No 0xE2 in 64 bytes — bulk copy */
+            vst1q_u8(out_ptr + out_idx, v0);
+            vst1q_u8(out_ptr + out_idx + 16, v1);
+            vst1q_u8(out_ptr + out_idx + 32, v2);
+            vst1q_u8(out_ptr + out_idx + 48, v3);
+            out_idx += 64;
+            i += 64;
+            continue;
+        }
+
+        /* 0xE2 found somewhere in 64 bytes — fall to per-chunk loop */
+        break;
+    }
+
+    /* === 16-byte per-chunk loop === */
+    while (i + 18 <= input_len) {
+        uint8x16_t v0 = vld1q_u8(in_ptr + i);
+
+        /* Cheap early-out: check for 0xE2 using lane extraction (2 ops vs 8+ for movemask) */
         uint8x16_t cmp0 = vceqq_u8(v0, pattern_0xe2);
-        uint16_t e2_mask = neon_movemask(cmp0);
-
-        if (LIKELY(e2_mask == 0)) {
-            /* No 0xE2 — copy 16 bytes directly */
+        if (LIKELY(!neon_any_nonzero(cmp0))) {
             vst1q_u8(out_ptr + out_idx, v0);
             out_idx += 16;
             i += 16;
             continue;
         }
 
-        /* 0xE2 found — do full 3-byte pattern check with overlapped loads */
-        uint8x16_t v1 = vld1q_u8((const uint8_t *)(input + i + 1));
-        uint8x16_t v2 = vld1q_u8((const uint8_t *)(input + i + 2));
+        /* 0xE2 found — do full 3-byte pattern check */
+        uint8x16_t v1 = vld1q_u8(in_ptr + i + 1);
+        uint8x16_t v2 = vld1q_u8(in_ptr + i + 2);
         uint8x16_t cmp1 = vceqq_u8(v1, pattern_0x80);
         uint8x16_t cmp2 = vceqq_u8(v2, pattern_0x94);
         uint8x16_t full_match = vandq_u8(cmp0, vandq_u8(cmp1, cmp2));
-        uint16_t mask = neon_movemask(full_match);
 
-        if (mask == 0) {
-            /* 0xE2 present but no full em-dash match */
+        if (LIKELY(!neon_any_nonzero(full_match))) {
+            /* 0xE2 present but no complete em-dash */
             vst1q_u8(out_ptr + out_idx, v0);
             out_idx += 16;
             i += 16;
             continue;
         }
 
-        /* Choose strategy based on match density */
-        int match_count = neon_popcount16(mask);
+        /* Store match result to memory and scan — avoids expensive neon_movemask.
+         * This is faster on ARM than bitmask extraction + CTZ for all densities. */
+        uint8_t match_bytes[16];
+        vst1q_u8(match_bytes, full_match);
 
-        if (LIKELY(match_count <= 2)) {
-            /* SPARSE: CTZ-based gap copying */
-            size_t wp = i;
-            uint16_t m = mask;
-            while (m != 0) {
-                int bit = neon_ctz16(m);
-                size_t match_pos = i + bit;
-
+        size_t wp = i;
+        for (int j = 0; j < 16; j++) {
+            if (match_bytes[j]) {
+                size_t match_pos = i + (size_t)j;
+                /* Copy gap before this match */
                 if (match_pos > wp) {
-                    size_t gap = match_pos - wp;
-                    memcpy(out_ptr + out_idx, input + wp, gap);
-                    out_idx += gap;
+                    memcpy(out_ptr + out_idx, in_ptr + wp, match_pos - wp);
+                    out_idx += match_pos - wp;
                 }
-
                 wp = match_pos + 3;
-                /* Clear this bit and possible continuation bits */
-                m &= ~(1u << bit);
-                if (bit + 1 < 16) m &= ~(1u << (bit + 1));
-                if (bit + 2 < 16) m &= ~(1u << (bit + 2));
-            }
-
-            size_t chunk_end = i + 16;
-            if (wp <= chunk_end) {
-                if (wp < chunk_end) {
-                    memcpy(out_ptr + out_idx, input + wp, chunk_end - wp);
-                    out_idx += chunk_end - wp;
-                }
-                i = chunk_end;
-            } else {
-                i = wp;
-            }
-        } else {
-            /* DENSE: Mask-expansion + bit-extract */
-            uint16_t remove = mask | (mask << 1) | (mask << 2);
-            uint16_t keep = (~remove) & 0xFFFF;
-
-            while (keep != 0) {
-                int pos = neon_ctz16(keep);
-                out_ptr[out_idx++] = in_ptr[i + pos];
-                keep &= keep - 1;
-            }
-
-            /* Handle boundary-spanning em-dashes */
-            if (mask & 0x8000u) {
-                i += 18;  /* Em-dash at pos 15: skip bytes 16, 17 in next chunk */
-            } else if (mask & 0x4000u) {
-                i += 17;  /* Em-dash at pos 14: skip byte 16 in next chunk */
-            } else {
-                i += 16;
+                j += 2;  /* Skip the 0x80 and 0x94 bytes */
             }
         }
+
+        /* Copy remainder of chunk and advance */
+        size_t chunk_end = i + 16;
+        if (wp < chunk_end) {
+            memcpy(out_ptr + out_idx, in_ptr + wp, chunk_end - wp);
+            out_idx += chunk_end - wp;
+        }
+        i = (wp > chunk_end) ? wp : chunk_end;
     }
 
     /* Scalar remainder */
