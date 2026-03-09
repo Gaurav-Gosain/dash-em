@@ -48,10 +48,11 @@ jobs:
       - name: Publish to npm with provenance
         run: |
           npm publish --provenance 2>&1 | tee npm-publish.log
+          EXIT_CODE=${PIPESTATUS[0]}
           if grep -q "cannot publish over the previously published versions" npm-publish.log; then
             echo "Package version already published, skipping"
             exit 0
-          elif [ ${PIPESTATUS[0]} -ne 0 ]; then
+          elif [ $EXIT_CODE -ne 0 ]; then
             echo "npm publish failed with a real error"
             exit 1
           fi
@@ -111,10 +112,11 @@ jobs:
       - name: Publish to crates.io with trusted publishing
         run: |
           cargo publish --allow-dirty 2>&1 | tee cargo-publish.log
+          EXIT_CODE=${PIPESTATUS[0]}
           if grep -q "already exists on crates.io index" cargo-publish.log; then
             echo "Crate version already published, skipping"
             exit 0
-          elif [ ${PIPESTATUS[0]} -ne 0 ]; then
+          elif [ $EXIT_CODE -ne 0 ]; then
             echo "cargo publish failed with a real error"
             exit 1
           fi
