@@ -1720,44 +1720,35 @@ static int dashem_remove_neon(
             continue;
         }
 
-        /* Process matches via CTZ on 64-bit lane values */
-        size_t wp = i;
+        /* Mask-expansion: expand match mask to cover all 3 bytes of each
+         * em-dash, then extract only kept bytes via CTZ.
+         * O(kept_bytes) with no memcpy overhead for small gaps. */
+        uint64_t remove_lo = lo | (lo << 8) | (lo << 16);
+        uint64_t keep_lo = ~remove_lo;
 
-        /* Process low 8 bytes (positions 0-7) */
-        while (lo != 0) {
-            int bit_pos = (int)dashem_ctzll(lo);
-            int byte_pos = bit_pos >> 3;
-            size_t match_pos = i + (size_t)byte_pos;
-
-            if (match_pos > wp) {
-                memcpy(out_ptr + out_idx, in_ptr + wp, match_pos - wp);
-                out_idx += match_pos - wp;
-            }
-            wp = match_pos + 3;
-            lo &= ~((uint64_t)0xFF << bit_pos);  /* Clear this match byte */
+        while (keep_lo != 0) {
+            int bit = (int)dashem_ctzll(keep_lo);
+            out_ptr[out_idx++] = in_ptr[i + (bit >> 3)];
+            keep_lo &= ~((uint64_t)0xFF << bit);
         }
 
-        /* Process high 8 bytes (positions 8-15) */
-        while (hi != 0) {
-            int bit_pos = (int)dashem_ctzll(hi);
-            int byte_pos = bit_pos >> 3;
-            size_t match_pos = i + 8 + (size_t)byte_pos;
+        uint64_t remove_hi = hi | (hi << 8) | (hi << 16);
+        uint64_t keep_hi = ~remove_hi;
 
-            if (match_pos > wp) {
-                memcpy(out_ptr + out_idx, in_ptr + wp, match_pos - wp);
-                out_idx += match_pos - wp;
-            }
-            wp = match_pos + 3;
-            hi &= ~((uint64_t)0xFF << bit_pos);
+        while (keep_hi != 0) {
+            int bit = (int)dashem_ctzll(keep_hi);
+            out_ptr[out_idx++] = in_ptr[i + 8 + (bit >> 3)];
+            keep_hi &= ~((uint64_t)0xFF << bit);
         }
 
-        /* Copy remainder of chunk and advance */
-        size_t chunk_end = i + 16;
-        if (wp < chunk_end) {
-            memcpy(out_ptr + out_idx, in_ptr + wp, chunk_end - wp);
-            out_idx += chunk_end - wp;
+        /* Handle boundary: em-dash starting near end spans into next chunk */
+        if (hi & ((uint64_t)0xFF << 56)) {
+            i += 18;  /* Match at byte 15 */
+        } else if (hi & ((uint64_t)0xFF << 48)) {
+            i += 17;  /* Match at byte 14 */
+        } else {
+            i += 16;
         }
-        i = (wp > chunk_end) ? wp : chunk_end;
     }
 
     /* Scalar remainder */
