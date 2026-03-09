@@ -94,8 +94,23 @@ DASHEM_STATIC_ASSERT(DASHEM_EM_DASH_BYTE3 == 0x94, "Em-dash byte 3 must be 0x94"
         _BitScanForward(&r, v);
         return (int)r;
     }
+    static inline int dashem_ctzll(uint64_t v) {
+        unsigned long r;
+    #if defined(_M_X64) || defined(_M_ARM64)
+        _BitScanForward64(&r, v);
+    #else
+        if ((uint32_t)v != 0) {
+            _BitScanForward(&r, (uint32_t)v);
+        } else {
+            _BitScanForward(&r, (uint32_t)(v >> 32));
+            r += 32;
+        }
+    #endif
+        return (int)r;
+    }
 #elif defined(__GNUC__) || defined(__clang__)
     #define dashem_ctz(x) __builtin_ctz(x)
+    #define dashem_ctzll(x) __builtin_ctzll(x)
 #else
     /* Software fallback for other compilers */
     static inline int dashem_ctz(uint32_t v) {
@@ -107,6 +122,11 @@ DASHEM_STATIC_ASSERT(DASHEM_EM_DASH_BYTE3 == 0x94, "Em-dash byte 3 must be 0x94"
         if ((v & 0x3) == 0) { count += 2; v >>= 2; }
         if ((v & 0x1) == 0) { count += 1; }
         return count;
+    }
+    static inline int dashem_ctzll(uint64_t v) {
+        if (v == 0) return 64;
+        if ((uint32_t)v != 0) return dashem_ctz((uint32_t)v);
+        return 32 + dashem_ctz((uint32_t)(v >> 32));
     }
 #endif
 
@@ -365,7 +385,7 @@ static int dashem_remove_scalar(
             i += 8;
         } else {
             /* Find position of first 0xE2 byte and bulk-copy everything before it */
-            int first_e2_bit = __builtin_ctzll(has_e2);
+            int first_e2_bit = dashem_ctzll(has_e2);
             int first_e2_byte = first_e2_bit >> 3;  /* Divide by 8: MSB position -> byte index */
 
             if (first_e2_byte > 0) {
@@ -1145,7 +1165,7 @@ static int dashem_remove_avx512(
 
         while (match_mask != 0) {
             /* Use 64-bit CTZ for 64-bit mask - critical for correctness */
-            int match_offset = __builtin_ctzll(match_mask);
+            int match_offset = dashem_ctzll(match_mask);
             size_t match_pos = i + processed + match_offset;
 
             if (match_pos > write_pos) {
@@ -1844,7 +1864,7 @@ static DASHEM_ALWAYS_INLINE int dashem_remove_insitu(
             write_pos += 8;
         } else {
             /* Found 0xE2 - skip to it, then check for em-dash */
-            int first_e2_byte = __builtin_ctzll(has_e2) >> 3;
+            int first_e2_byte = dashem_ctzll(has_e2) >> 3;
             read_pos += first_e2_byte;
             write_pos += first_e2_byte;
             break;
