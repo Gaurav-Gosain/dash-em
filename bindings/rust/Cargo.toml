@@ -1,6 +1,6 @@
 [package]
 name = "dash-em"
-version = "1.0.1"
+version = "1.1.0"
 edition = "2021"
 authors = ["Gaurav Gosain <itsgauravgosain@gmail.com>"]
 license = "MIT"

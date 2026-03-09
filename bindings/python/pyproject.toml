@@ -7,7 +7,7 @@ include-package-data = true
 
 [project]
 name = "dash-em"
-version = "1.0.1"
+version = "1.1.0"
 description = "Enterprise-Grade Em-Dash Removal Library — SIMD-Accelerated String Processing"
 requires-python = ">=3.10"
 authors = [
