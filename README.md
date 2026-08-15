@@ -223,18 +223,19 @@ It's absurdly optimized. Maybe too optimized. But it works—and it's fast.
 
 
 
+
 ### Core Library Performance
 
 Multi-architecture SIMD performance (statistical benchmarks):
 
 | Pattern | ubuntu-22.04-gcc | windows-2022-msvc | macos-14-aarch64 | ubuntu-22.04-clang |
 |---------|----------|----------|----------|----------|
-| sparse | 25.86 GB/s (17.70x) | 16.73 GB/s (16.72x) | 27.27 GB/s (20.32x) | 25.52 GB/s (30.91x) |
-| moderate | 8.77 GB/s (6.47x) | 9.22 GB/s (9.62x) | 6.50 GB/s (5.43x) | 19.24 GB/s (11.85x) |
-| dense | 3.20 GB/s (1.33x) | 1.84 GB/s (0.92x) | 1.60 GB/s (1.04x) | 17.79 GB/s (8.02x) |
-| alternating | 3.21 GB/s (1.33x) | 1.84 GB/s (0.92x) | 1.59 GB/s (1.09x) | 17.01 GB/s (7.67x) |
-| boundary | 15.70 GB/s (11.20x) | 14.19 GB/s (14.63x) | 9.79 GB/s (7.67x) | 29.66 GB/s (18.72x) |
-| no | 26.19 GB/s (17.75x) | 27.64 GB/s (27.62x) | 40.00 GB/s (30.20x) | 22.91 GB/s (27.51x) |
+| sparse | 28.45 GB/s (19.52x) | 28.13 GB/s (25.51x) | 27.71 GB/s (18.68x) | 26.24 GB/s (17.91x) |
+| moderate | 8.62 GB/s (6.41x) | 9.51 GB/s (8.38x) | 6.22 GB/s (5.29x) | 8.29 GB/s (6.10x) |
+| dense | 3.20 GB/s (1.33x) | 4.30 GB/s (1.98x) | 1.69 GB/s (1.00x) | 3.19 GB/s (1.38x) |
+| alternating | 3.22 GB/s (1.34x) | 4.33 GB/s (1.95x) | 1.74 GB/s (1.00x) | 3.20 GB/s (1.39x) |
+| boundary | 15.48 GB/s (11.05x) | 14.53 GB/s (13.21x) | 10.61 GB/s (7.17x) | 14.15 GB/s (10.16x) |
+| no | 34.47 GB/s (23.35x) | 35.60 GB/s (31.87x) | 42.92 GB/s (29.76x) | 34.47 GB/s (23.35x) |
 
 ### Language Bindings Performance
 
@@ -242,17 +243,17 @@ Comparing dash-em bindings against native byte-level implementations:
 
 | Language | Test Pattern | Native (μs) | dash-em (μs) | Speedup |
 |----------|--------------|-------------|--------------|---------|
-| javascript | alternating | 66.7 | 19.1 | 3.49x |
-| javascript | dense | 114.9 | 38.9 | 2.95x |
-| javascript | moderate | 319.8 | 12.8 | 24.94x |
-| javascript | no | 2937.0 | 71.5 | 41.10x |
-| javascript | sparse | 2968.2 | 82.1 | 36.15x |
-| python | alternating | 2107.6 | 47.3 | 44.53x |
-| python | dense | 4657.5 | 46.6 | 99.96x |
-| python | moderate | 12720.7 | 17.8 | 713.23x |
-| python | no | 115670.3 | 184.2 | 628.03x |
-| python | sparse | 115065.9 | 191.6 | 600.40x |
-<!-- Performance table last updated: 2026-08-14T03:54:23.184782 -->
+| javascript | alternating | 84.7 | 18.8 | 4.50x |
+| javascript | dense | 135.2 | 53.5 | 2.53x |
+| javascript | moderate | 307.3 | 51.9 | 5.92x |
+| javascript | no | 2996.9 | 76.6 | 39.11x |
+| javascript | sparse | 2873.6 | 91.2 | 31.50x |
+| python | alternating | 3775.5 | 52.9 | 71.40x |
+| python | dense | 7742.2 | 55.0 | 140.64x |
+| python | moderate | 19041.2 | 27.7 | 687.86x |
+| python | no | 193869.7 | 272.1 | 712.51x |
+| python | sparse | 193878.9 | 425.1 | 456.04x |
+<!-- Performance table last updated: 2026-08-15T02:43:41.932126 -->
 
 
 ## Installation
