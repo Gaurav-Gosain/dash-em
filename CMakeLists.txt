@@ -145,7 +145,7 @@ if(BUILD_SAFE_VERSION AND FILC_COMPILER)
         OUTPUT ${DASHEM_SAFE_OBJ}
         COMMAND ${FILC_COMPILER}
             -Wall -Wextra -Wpedantic
-            -O2 -c
+            -O2 -c -DDASHEM_SCALAR_ONLY
             -I${CMAKE_CURRENT_SOURCE_DIR}/src
             -o ${DASHEM_SAFE_OBJ}
             ${CMAKE_CURRENT_SOURCE_DIR}/src/dashem.c

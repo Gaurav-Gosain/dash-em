@@ -75,11 +75,12 @@ uint32_t dashem_detect_cpu_features(void);
  * Processes input string and removes all occurrences of em-dashes (U+2014).
  * Automatically selects optimal SIMD implementation based on available CPU features.
  *
- * Implementation automatically dispatches to the fastest available:
- * - AVX-512F (if available)
+ * Implementation automatically dispatches at runtime to the fastest available,
+ * independent of the compiler flags used to build the library:
+ * - AVX-512 VBMI2 (if available)
  * - AVX2 (if available)
  * - SSE4.2 (if available)
- * - SSE2 (if available)
+ * - NEON (ARM)
  * - Scalar fallback (always available)
  *
  * @param[in] input Pointer to input UTF-8 string
@@ -94,6 +95,8 @@ uint32_t dashem_detect_cpu_features(void);
  *
  * @note Input and output buffers may overlap if output buffer starts at or after input
  * @note Output buffer must be at least as large as input buffer
+ * @note Bytes of the output buffer after *output_len, up to input_len, may be
+ *       overwritten with scratch data
  */
 int dashem_remove(
     const char * restrict input,

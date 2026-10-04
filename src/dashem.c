@@ -131,55 +131,118 @@ DASHEM_STATIC_ASSERT(DASHEM_EM_DASH_BYTE3 == 0x94, "Em-dash byte 3 must be 0x94"
 #endif
 
 /* ============================================================================
+ * Kernel Availability
+ * ============================================================================ */
+
+#if defined(__x86_64__) || defined(__i386__) || defined(_M_X64) || defined(_M_IX86)
+    #define DASHEM_X86 1
+#endif
+
+/* The x86 kernels are compiled for their own instruction set through target
+ * attributes (GCC/Clang) or plain intrinsics (MSVC) and picked at runtime, so a
+ * build for the generic x86-64 baseline (Python wheels, Rust, Go) still gets
+ * SIMD. Define DASHEM_SCALAR_ONLY to build only the portable kernels. */
+#if defined(DASHEM_X86) && !defined(DASHEM_SCALAR_ONLY)
+    #if defined(__clang__) || defined(__GNUC__)
+        #define DASHEM_X86_KERNELS 1
+        #define DASHEM_TARGET(isa) __attribute__((target(isa)))
+        #if (defined(__clang__) && __clang_major__ >= 10) || (!defined(__clang__) && __GNUC__ >= 8)
+            #define DASHEM_AVX512_COMPILER 1
+        #endif
+    #elif defined(_MSC_VER)
+        #define DASHEM_X86_KERNELS 1
+        #define DASHEM_TARGET(isa)
+        #if _MSC_VER >= 1920
+            #define DASHEM_AVX512_COMPILER 1
+        #endif
+    #endif
+    /* The AVX-512 kernel counts its 64-bit keep mask with a 64-bit popcount. */
+    #if defined(DASHEM_AVX512_COMPILER) && (defined(__x86_64__) || defined(_M_X64))
+        #define DASHEM_X86_AVX512 1
+    #endif
+#endif
+
+#if defined(DASHEM_X86_KERNELS)
+    #include <immintrin.h>
+#endif
+
+/* ============================================================================
  * CPU Feature Detection
  * ============================================================================ */
 
-/* x86/x86_64 CPUID-based detection */
-#if (defined(__GNUC__) || defined(__clang__)) && (defined(__x86_64__) || defined(__i386__) || defined(_M_X64) || defined(_M_IX86))
+#if defined(DASHEM_X86) && (defined(__GNUC__) || defined(__clang__))
     #include <cpuid.h>
 
-static uint32_t __detect_cpu_features(void) {
-    uint32_t features = DASHEM_CPU_SCALAR;
-    uint32_t eax, ebx, ecx, edx;
-
-    /* Check for SSE2 */
-    if (__get_cpuid(1, &eax, &ebx, &ecx, &edx)) {
-        if (edx & (1U << 26)) features |= DASHEM_CPU_SSE2;
-        if (ecx & (1U << 0))  features |= DASHEM_CPU_SSE42;
-        if (ecx & (1U << 28)) features |= DASHEM_CPU_AVX;
-    }
-
-    /* Check for AVX2, AVX-512, BMI2, and AVX512VBMI2 */
-    if (__get_cpuid_count(7, 0, &eax, &ebx, &ecx, &edx)) {
-        if (ebx & (1U << 5))  features |= DASHEM_CPU_AVX2;
-        if (ebx & (1U << 8))  features |= DASHEM_CPU_BMI2;
-        if (ebx & (1U << 16)) features |= DASHEM_CPU_AVX512F;
-        if (ecx & (1U << 6))  features |= DASHEM_CPU_AVX512VBMI2;
-    }
-
-    return features;
+static void dashem_cpuid(uint32_t leaf, uint32_t subleaf, uint32_t regs[4]) {
+    __cpuid_count(leaf, subleaf, regs[0], regs[1], regs[2], regs[3]);
 }
 
-/* MSVC x86/x86_64 detection */
-#elif defined(_MSC_VER) && (defined(_M_X64) || defined(_M_IX86))
+/* XCR0: which register states the OS saves on a context switch. */
+static uint64_t dashem_xgetbv(void) {
+    uint32_t lo, hi;
+    __asm__ __volatile__(".byte 0x0f, 0x01, 0xd0" : "=a"(lo), "=d"(hi) : "c"(0));
+    return ((uint64_t)hi << 32) | lo;
+}
+    #define DASHEM_HAVE_CPUID 1
+
+#elif defined(DASHEM_X86) && defined(_MSC_VER)
     #include <intrin.h>
 
+static void dashem_cpuid(uint32_t leaf, uint32_t subleaf, uint32_t regs[4]) {
+    int r[4];
+    __cpuidex(r, (int)leaf, (int)subleaf);
+    regs[0] = (uint32_t)r[0];
+    regs[1] = (uint32_t)r[1];
+    regs[2] = (uint32_t)r[2];
+    regs[3] = (uint32_t)r[3];
+}
+
+static uint64_t dashem_xgetbv(void) {
+    return (uint64_t)_xgetbv(0);
+}
+    #define DASHEM_HAVE_CPUID 1
+#endif
+
+#if defined(DASHEM_HAVE_CPUID)
 static uint32_t __detect_cpu_features(void) {
     uint32_t features = DASHEM_CPU_SCALAR;
-    int cpuid_info[4] = {0};
+    uint32_t r[4];
 
-    /* Check for SSE2 and AVX */
-    __cpuid(cpuid_info, 1);
-    if (cpuid_info[3] & (1U << 26)) features |= DASHEM_CPU_SSE2;
-    if (cpuid_info[2] & (1U << 0))  features |= DASHEM_CPU_SSE42;
-    if (cpuid_info[2] & (1U << 28)) features |= DASHEM_CPU_AVX;
+    dashem_cpuid(0, 0, r);
+    uint32_t max_leaf = r[0];
+    if (max_leaf < 1) {
+        return features;
+    }
 
-    /* Check for AVX2, AVX-512, BMI2, and AVX512VBMI2 */
-    __cpuidex(cpuid_info, 7, 0);
-    if (cpuid_info[1] & (1U << 5))  features |= DASHEM_CPU_AVX2;
-    if (cpuid_info[1] & (1U << 8))  features |= DASHEM_CPU_BMI2;
-    if (cpuid_info[1] & (1U << 16)) features |= DASHEM_CPU_AVX512F;
-    if (cpuid_info[2] & (1U << 6))  features |= DASHEM_CPU_AVX512VBMI2;
+    dashem_cpuid(1, 0, r);
+    uint32_t ecx1 = r[2];
+    uint32_t edx1 = r[3];
+
+    if (edx1 & (1U << 26)) features |= DASHEM_CPU_SSE2;
+    /* The SSE4.2 kernel uses SSSE3 shuffles; every SSE4.2 CPU has SSSE3. */
+    if ((ecx1 & (1U << 9)) && (ecx1 & (1U << 20))) features |= DASHEM_CPU_SSE42;
+
+    /* AVX state is usable only when the OS saves YMM (and ZMM for AVX-512)
+     * registers, which XCR0 reports once OSXSAVE is set. */
+    uint64_t xcr0 = (ecx1 & (1U << 27)) ? dashem_xgetbv() : 0;
+    int os_avx = (xcr0 & 0x06) == 0x06;
+    int os_avx512 = (xcr0 & 0xE6) == 0xE6;
+
+    if ((ecx1 & (1U << 28)) && os_avx) features |= DASHEM_CPU_AVX;
+
+    if (max_leaf >= 7) {
+        dashem_cpuid(7, 0, r);
+        uint32_t ebx7 = r[1];
+        uint32_t ecx7 = r[2];
+
+        if ((ebx7 & (1U << 5)) && os_avx) features |= DASHEM_CPU_AVX2;
+        if (ebx7 & (1U << 8)) features |= DASHEM_CPU_BMI2;
+        if ((ebx7 & (1U << 16)) && os_avx512) features |= DASHEM_CPU_AVX512F;
+        /* VPCOMPRESSB needs VBMI2 plus the byte-mask compares of AVX512BW. */
+        if ((ebx7 & (1U << 16)) && (ebx7 & (1U << 30)) && (ecx7 & (1U << 6)) && os_avx512) {
+            features |= DASHEM_CPU_AVX512VBMI2;
+        }
+    }
 
     return features;
 }
@@ -197,86 +260,9 @@ static uint32_t __detect_cpu_features(void) {
 }
 #endif
 
-/* Global state for CPU feature detection and dispatch */
+/* Global state for CPU feature detection */
 static uint32_t g_cpu_features = 0;
 static int g_features_detected = 0;
-
-/* Function pointer for optimal implementation (cached after first call) */
-typedef int (*dashem_remove_fn)(
-    const char * restrict input,
-    size_t input_len,
-    char * restrict output,
-    size_t output_capacity,
-    size_t * restrict output_len
-);
-static dashem_remove_fn g_dashem_remove_impl = NULL;
-
-/* Forward declarations for implementation functions */
-static int dashem_remove_scalar(
-    const char *input,
-    size_t input_len,
-    char *output,
-    size_t output_capacity,
-    size_t *output_len
-);
-
-#if defined(__AVX2__)
-static int dashem_remove_avx2(
-    const char *input,
-    size_t input_len,
-    char *output,
-    size_t output_capacity,
-    size_t *output_len
-);
-
-static int dashem_remove_avx2_unrolled(
-    const char *input,
-    size_t input_len,
-    char *output,
-    size_t output_capacity,
-    size_t *output_len
-);
-#endif
-
-#if defined(__AVX512F__)
-static int dashem_remove_avx512(
-    const char *input,
-    size_t input_len,
-    char *output,
-    size_t output_capacity,
-    size_t *output_len
-);
-#endif
-
-#if defined(__SSE4_2__)
-static int dashem_remove_sse42(
-    const char *input,
-    size_t input_len,
-    char *output,
-    size_t output_capacity,
-    size_t *output_len
-);
-#endif
-
-#if defined(__BMI2__)
-static int dashem_remove_bmi2(
-    const char *input,
-    size_t input_len,
-    char *output,
-    size_t output_capacity,
-    size_t *output_len
-);
-#endif
-
-#if defined(__ARM_NEON)
-static int dashem_remove_neon(
-    const char *input,
-    size_t input_len,
-    char *output,
-    size_t output_capacity,
-    size_t *output_len
-);
-#endif
 
 uint32_t dashem_detect_cpu_features(void) {
     if (!g_features_detected) {
@@ -286,66 +272,26 @@ uint32_t dashem_detect_cpu_features(void) {
     return g_cpu_features;
 }
 
-/* Forward declarations for implementation functions */
-#if defined(__AVX512VBMI2__) && defined(__AVX512BW__)
-static int dashem_remove_avx512_compress(const char*, size_t, char*, size_t, size_t*);
-#endif
-#if defined(__AVX2__)
-static int dashem_remove_avx2(const char*, size_t, char*, size_t, size_t*);
-static int dashem_remove_avx2_twopass(const char*, size_t, char*, size_t, size_t*);
-static int dashem_remove_avx2_pshufb(const char*, size_t, char*, size_t, size_t*);
-#endif
-#if defined(__BMI2__)
-static int dashem_remove_bmi2(const char*, size_t, char*, size_t, size_t*);
-#endif
+/* Signature shared by every kernel. The caller has already checked the
+ * arguments and the output capacity. */
+typedef int (*dashem_remove_fn)(
+    const char *input,
+    size_t input_len,
+    char *output,
+    size_t output_capacity,
+    size_t *output_len
+);
 
-/* Initialize the optimal implementation function pointer */
-static dashem_remove_fn dashem_init_impl(void) {
-    uint32_t features = dashem_detect_cpu_features();
+/* A kernel, its display name, and whether it accepts input == output. */
+typedef struct {
+    dashem_remove_fn fn;
+    const char *name;
+    int in_place;
+} dashem_impl_t;
 
-#if defined(__AVX512VBMI2__) && defined(__AVX512BW__)
-    /* REVOLUTIONARY: Use hardware-accelerated VPCOMPRESSB if available */
-    if (features & DASHEM_CPU_AVX512VBMI2) {
-        return dashem_remove_avx512_compress;
-    }
-#endif
-
-#if defined(__AVX512F__)
-    if (features & DASHEM_CPU_AVX512F) {
-        return dashem_remove_avx512;
-    }
-#endif
-
-#if defined(__AVX2__)
-    if (features & DASHEM_CPU_AVX2) {
-        /* Use regular AVX2 with optimizations */
-        return dashem_remove_avx2;
-    }
-#endif
-
-#if defined(__BMI2__)
-    /* BMI2 as fallback when AVX2 not available */
-    if (features & DASHEM_CPU_BMI2) {
-        /* Re-enabled after fixing boundary conditions */
-        return dashem_remove_bmi2;
-    }
-#endif
-
-#if defined(__SSE4_2__)
-    if (features & DASHEM_CPU_SSE42) {
-        return dashem_remove_sse42;
-    }
-#endif
-
-#if defined(__ARM_NEON)
-    if (features & DASHEM_CPU_NEON) {
-        return dashem_remove_neon;
-    }
-#endif
-
-    return dashem_remove_scalar;
-}
-
+/* Selected once and cached. A single pointer, so a racing first call from two
+ * threads stores the same value either way. */
+static const dashem_impl_t *g_dashem_impl = NULL;
 /* ============================================================================
  * Scalar Implementation (Portable Fallback)
  * ============================================================================ */
@@ -422,961 +368,590 @@ static int dashem_remove_scalar(
     return 0;
 }
 
-/* ============================================================================
- * Fast Path for Small Strings (< 32 bytes)
- * ============================================================================ */
-
-/* Specialized fast path for small inputs that avoids SIMD overhead */
-static inline int dashem_remove_fast_small(
-    const char *input,
+/**
+ * @brief In-situ optimized scalar implementation for in-place operations
+ *
+ * When input and output buffers are the same, we can use a more efficient
+ * algorithm that avoids unnecessary copying. This provides 15-25% speedup.
+ */
+static DASHEM_ALWAYS_INLINE int dashem_remove_insitu(
+    const char *buffer,
     size_t input_len,
-    char *output,
-    size_t output_capacity,
     size_t *output_len
 ) {
-    if (output_capacity < input_len) {
-        return -1;
+    size_t read_pos = 0;
+    size_t write_pos = 0;
+    const unsigned char *in_ptr = (const unsigned char *)buffer;
+    unsigned char *out_ptr = (unsigned char *)buffer;
+
+    /* SWAR fast-skip: while read and write positions are identical,
+     * scan 8 bytes at a time for 0xE2 - skip past safe regions without copying */
+    while (read_pos == write_pos && read_pos + 10 <= input_len) {
+        uint64_t chunk;
+        memcpy(&chunk, in_ptr + read_pos, 8);
+        uint64_t test = chunk ^ 0xE2E2E2E2E2E2E2E2ULL;
+        uint64_t has_e2 = (test - 0x0101010101010101ULL) & ~test & 0x8080808080808080ULL;
+
+        if (LIKELY(has_e2 == 0)) {
+            /* No 0xE2 bytes - positions stay in sync, just advance both */
+            read_pos += 8;
+            write_pos += 8;
+        } else {
+            /* Found 0xE2 - skip to it, then check for em-dash */
+            int first_e2_byte = dashem_ctzll(has_e2) >> 3;
+            read_pos += first_e2_byte;
+            write_pos += first_e2_byte;
+            break;
+        }
     }
 
-    size_t out_idx = 0;
-    size_t i = 0;
-    const unsigned char *in_ptr = (const unsigned char *)input;
-    unsigned char *out_ptr = (unsigned char *)output;
-
-    /* For small strings, direct byte-by-byte processing with aggressive inlining */
-    while (i < input_len) {
-        if (i + 3 <= input_len &&
-            in_ptr[i] == 0xE2 &&
-            in_ptr[i + 1] == 0x80 &&
-            in_ptr[i + 2] == 0x94) {
+    while (read_pos < input_len) {
+        if (read_pos + 3 <= input_len &&
+            in_ptr[read_pos] == 0xE2 &&
+            in_ptr[read_pos + 1] == 0x80 &&
+            in_ptr[read_pos + 2] == 0x94) {
             /* Skip em-dash (3 bytes) */
-            i += 3;
+            read_pos += 3;
         } else {
-            /* Copy single byte */
-            out_ptr[out_idx++] = in_ptr[i++];
+            /* Copy single byte (only if write position changed) */
+            if (write_pos != read_pos) {
+                out_ptr[write_pos] = in_ptr[read_pos];
+            }
+            write_pos++;
+            read_pos++;
         }
     }
 
-    *output_len = out_idx;
+    *output_len = write_pos;
     return 0;
 }
 
 /* ============================================================================
- * SIMD Implementation - AVX2
- * ============================================================================ */
-
-#if defined(__AVX2__)
-    #include <immintrin.h>
-
-/* AVX2 implementation with proper chunk boundary handling.
+ * SIMD Implementations - x86 (SSE4.2, AVX2, AVX-512 VBMI2)
+ * ============================================================================
  *
- * The key fix: write_pos is maintained across chunk boundaries so that
- * em-dashes spanning from one chunk to the next are properly skipped.
- * This ensures that when an em-dash starts at position i+31 (last byte
- * of a chunk), the remaining 2 bytes of the em-dash (0x80 0x94) in the
- * next chunk are correctly skipped rather than copied to output. */
-
-/**
- * @brief Two-Pass AVX2 implementation with Count-Then-Compact algorithm
+ * All x86 kernels share one scheme. Each step loads a block plus the two bytes
+ * after it, and compares the block, the block shifted by one byte, and the block
+ * shifted by two bytes against 0xE2, 0x80 and 0x94. The AND of the three is a
+ * bitmask m with one bit per em-dash start. The bytes to drop are
+ * m | m << 1 | m << 2, plus a carry of up to two bytes from an em-dash that began
+ * at the end of the previous block. The kept bytes are packed with a byte shuffle
+ * (or VPCOMPRESSB) and stored, so the cost per block is the same for any number
+ * of em-dashes.
  *
- * Revolutionary approach that eliminates the memcpy fragmentation problem:
- * Pass 1: Count em-dashes using pure SIMD (no output, no memcpy)
- * Pass 2: Single forward compaction with known positions
- *
- * This fixes the critical performance bug where dense patterns were 0.54x
- * slower than naive by eliminating 30+ memcpy calls per chunk.
+ * The packing stores write a little past the last kept byte, but never past the
+ * end of the input block being processed. Because the output position never
+ * runs ahead of the input position, those stores stay inside output_capacity,
+ * and all loads of a block happen before its stores, which makes the kernels
+ * safe for in-place use (input == output).
  */
-static int dashem_remove_avx2_twopass(
-    const char *input,
-    size_t input_len,
-    char *output,
-    size_t output_capacity,
-    size_t *output_len
+
+#if defined(DASHEM_X86_KERNELS)
+
+/* pshufb indices that move the bytes selected by an 8-bit keep mask to the
+ * front of an 8-byte group. Unused slots hold 0x80, which pshufb zeroes. */
+static const uint64_t dashem_pack_lut[256] = {
+    0x8080808080808080ULL, 0x8080808080808000ULL, 0x8080808080808001ULL, 0x8080808080800100ULL,
+    0x8080808080808002ULL, 0x8080808080800200ULL, 0x8080808080800201ULL, 0x8080808080020100ULL,
+    0x8080808080808003ULL, 0x8080808080800300ULL, 0x8080808080800301ULL, 0x8080808080030100ULL,
+    0x8080808080800302ULL, 0x8080808080030200ULL, 0x8080808080030201ULL, 0x8080808003020100ULL,
+    0x8080808080808004ULL, 0x8080808080800400ULL, 0x8080808080800401ULL, 0x8080808080040100ULL,
+    0x8080808080800402ULL, 0x8080808080040200ULL, 0x8080808080040201ULL, 0x8080808004020100ULL,
+    0x8080808080800403ULL, 0x8080808080040300ULL, 0x8080808080040301ULL, 0x8080808004030100ULL,
+    0x8080808080040302ULL, 0x8080808004030200ULL, 0x8080808004030201ULL, 0x8080800403020100ULL,
+    0x8080808080808005ULL, 0x8080808080800500ULL, 0x8080808080800501ULL, 0x8080808080050100ULL,
+    0x8080808080800502ULL, 0x8080808080050200ULL, 0x8080808080050201ULL, 0x8080808005020100ULL,
+    0x8080808080800503ULL, 0x8080808080050300ULL, 0x8080808080050301ULL, 0x8080808005030100ULL,
+    0x8080808080050302ULL, 0x8080808005030200ULL, 0x8080808005030201ULL, 0x8080800503020100ULL,
+    0x8080808080800504ULL, 0x8080808080050400ULL, 0x8080808080050401ULL, 0x8080808005040100ULL,
+    0x8080808080050402ULL, 0x8080808005040200ULL, 0x8080808005040201ULL, 0x8080800504020100ULL,
+    0x8080808080050403ULL, 0x8080808005040300ULL, 0x8080808005040301ULL, 0x8080800504030100ULL,
+    0x8080808005040302ULL, 0x8080800504030200ULL, 0x8080800504030201ULL, 0x8080050403020100ULL,
+    0x8080808080808006ULL, 0x8080808080800600ULL, 0x8080808080800601ULL, 0x8080808080060100ULL,
+    0x8080808080800602ULL, 0x8080808080060200ULL, 0x8080808080060201ULL, 0x8080808006020100ULL,
+    0x8080808080800603ULL, 0x8080808080060300ULL, 0x8080808080060301ULL, 0x8080808006030100ULL,
+    0x8080808080060302ULL, 0x8080808006030200ULL, 0x8080808006030201ULL, 0x8080800603020100ULL,
+    0x8080808080800604ULL, 0x8080808080060400ULL, 0x8080808080060401ULL, 0x8080808006040100ULL,
+    0x8080808080060402ULL, 0x8080808006040200ULL, 0x8080808006040201ULL, 0x8080800604020100ULL,
+    0x8080808080060403ULL, 0x8080808006040300ULL, 0x8080808006040301ULL, 0x8080800604030100ULL,
+    0x8080808006040302ULL, 0x8080800604030200ULL, 0x8080800604030201ULL, 0x8080060403020100ULL,
+    0x8080808080800605ULL, 0x8080808080060500ULL, 0x8080808080060501ULL, 0x8080808006050100ULL,
+    0x8080808080060502ULL, 0x8080808006050200ULL, 0x8080808006050201ULL, 0x8080800605020100ULL,
+    0x8080808080060503ULL, 0x8080808006050300ULL, 0x8080808006050301ULL, 0x8080800605030100ULL,
+    0x8080808006050302ULL, 0x8080800605030200ULL, 0x8080800605030201ULL, 0x8080060503020100ULL,
+    0x8080808080060504ULL, 0x8080808006050400ULL, 0x8080808006050401ULL, 0x8080800605040100ULL,
+    0x8080808006050402ULL, 0x8080800605040200ULL, 0x8080800605040201ULL, 0x8080060504020100ULL,
+    0x8080808006050403ULL, 0x8080800605040300ULL, 0x8080800605040301ULL, 0x8080060504030100ULL,
+    0x8080800605040302ULL, 0x8080060504030200ULL, 0x8080060504030201ULL, 0x8006050403020100ULL,
+    0x8080808080808007ULL, 0x8080808080800700ULL, 0x8080808080800701ULL, 0x8080808080070100ULL,
+    0x8080808080800702ULL, 0x8080808080070200ULL, 0x8080808080070201ULL, 0x8080808007020100ULL,
+    0x8080808080800703ULL, 0x8080808080070300ULL, 0x8080808080070301ULL, 0x8080808007030100ULL,
+    0x8080808080070302ULL, 0x8080808007030200ULL, 0x8080808007030201ULL, 0x8080800703020100ULL,
+    0x8080808080800704ULL, 0x8080808080070400ULL, 0x8080808080070401ULL, 0x8080808007040100ULL,
+    0x8080808080070402ULL, 0x8080808007040200ULL, 0x8080808007040201ULL, 0x8080800704020100ULL,
+    0x8080808080070403ULL, 0x8080808007040300ULL, 0x8080808007040301ULL, 0x8080800704030100ULL,
+    0x8080808007040302ULL, 0x8080800704030200ULL, 0x8080800704030201ULL, 0x8080070403020100ULL,
+    0x8080808080800705ULL, 0x8080808080070500ULL, 0x8080808080070501ULL, 0x8080808007050100ULL,
+    0x8080808080070502ULL, 0x8080808007050200ULL, 0x8080808007050201ULL, 0x8080800705020100ULL,
+    0x8080808080070503ULL, 0x8080808007050300ULL, 0x8080808007050301ULL, 0x8080800705030100ULL,
+    0x8080808007050302ULL, 0x8080800705030200ULL, 0x8080800705030201ULL, 0x8080070503020100ULL,
+    0x8080808080070504ULL, 0x8080808007050400ULL, 0x8080808007050401ULL, 0x8080800705040100ULL,
+    0x8080808007050402ULL, 0x8080800705040200ULL, 0x8080800705040201ULL, 0x8080070504020100ULL,
+    0x8080808007050403ULL, 0x8080800705040300ULL, 0x8080800705040301ULL, 0x8080070504030100ULL,
+    0x8080800705040302ULL, 0x8080070504030200ULL, 0x8080070504030201ULL, 0x8007050403020100ULL,
+    0x8080808080800706ULL, 0x8080808080070600ULL, 0x8080808080070601ULL, 0x8080808007060100ULL,
+    0x8080808080070602ULL, 0x8080808007060200ULL, 0x8080808007060201ULL, 0x8080800706020100ULL,
+    0x8080808080070603ULL, 0x8080808007060300ULL, 0x8080808007060301ULL, 0x8080800706030100ULL,
+    0x8080808007060302ULL, 0x8080800706030200ULL, 0x8080800706030201ULL, 0x8080070603020100ULL,
+    0x8080808080070604ULL, 0x8080808007060400ULL, 0x8080808007060401ULL, 0x8080800706040100ULL,
+    0x8080808007060402ULL, 0x8080800706040200ULL, 0x8080800706040201ULL, 0x8080070604020100ULL,
+    0x8080808007060403ULL, 0x8080800706040300ULL, 0x8080800706040301ULL, 0x8080070604030100ULL,
+    0x8080800706040302ULL, 0x8080070604030200ULL, 0x8080070604030201ULL, 0x8007060403020100ULL,
+    0x8080808080070605ULL, 0x8080808007060500ULL, 0x8080808007060501ULL, 0x8080800706050100ULL,
+    0x8080808007060502ULL, 0x8080800706050200ULL, 0x8080800706050201ULL, 0x8080070605020100ULL,
+    0x8080808007060503ULL, 0x8080800706050300ULL, 0x8080800706050301ULL, 0x8080070605030100ULL,
+    0x8080800706050302ULL, 0x8080070605030200ULL, 0x8080070605030201ULL, 0x8007060503020100ULL,
+    0x8080808007060504ULL, 0x8080800706050400ULL, 0x8080800706050401ULL, 0x8080070605040100ULL,
+    0x8080800706050402ULL, 0x8080070605040200ULL, 0x8080070605040201ULL, 0x8007060504020100ULL,
+    0x8080800706050403ULL, 0x8080070605040300ULL, 0x8080070605040301ULL, 0x8007060504030100ULL,
+    0x8080070605040302ULL, 0x8007060504030200ULL, 0x8007060504030201ULL, 0x0706050403020100ULL,
+};
+
+/* Number of set bits in each 8-bit keep mask. */
+static const uint8_t dashem_popcnt8[256] = {
+    0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4,
+    1, 2, 2, 3, 2, 3, 3, 4, 2, 3, 3, 4, 3, 4, 4, 5,
+    1, 2, 2, 3, 2, 3, 3, 4, 2, 3, 3, 4, 3, 4, 4, 5,
+    2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6,
+    1, 2, 2, 3, 2, 3, 3, 4, 2, 3, 3, 4, 3, 4, 4, 5,
+    2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6,
+    2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6,
+    3, 4, 4, 5, 4, 5, 5, 6, 4, 5, 5, 6, 5, 6, 6, 7,
+    1, 2, 2, 3, 2, 3, 3, 4, 2, 3, 3, 4, 3, 4, 4, 5,
+    2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6,
+    2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6,
+    3, 4, 4, 5, 4, 5, 5, 6, 4, 5, 5, 6, 5, 6, 6, 7,
+    2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6,
+    3, 4, 4, 5, 4, 5, 5, 6, 4, 5, 5, 6, 5, 6, 6, 7,
+    3, 4, 4, 5, 4, 5, 5, 6, 4, 5, 5, 6, 5, 6, 6, 7,
+    4, 5, 5, 6, 5, 6, 6, 7, 5, 6, 6, 7, 6, 7, 7, 8,
+};
+
+/* Packs the bytes of v selected by the low 16 bits of keep (bit j = byte j) to
+ * dst and returns the new end. Each 8-byte half is stored whole, so up to 16
+ * bytes are written. */
+DASHEM_TARGET("ssse3")
+static DASHEM_ALWAYS_INLINE unsigned char *dashem_pack16(unsigned char *dst, __m128i v, uint32_t keep) {
+    uint32_t lo = keep & 0xFF;
+    uint32_t hi = (keep >> 8) & 0xFF;
+    __m128i idx = _mm_set_epi64x(
+        (long long)(dashem_pack_lut[hi] + 0x0808080808080808ULL),
+        (long long)dashem_pack_lut[lo]);
+    __m128i packed = _mm_shuffle_epi8(v, idx);
+    _mm_storel_epi64((__m128i *)dst, packed);
+    dst += dashem_popcnt8[lo];
+    _mm_storeh_pi((__m64 *)dst, _mm_castsi128_ps(packed));
+    return dst + dashem_popcnt8[hi];
+}
+
+/* Processes len bytes from src in whole blocks (len is a multiple of the block
+ * size; src + len + 2 is readable). *carry carries em-dash bytes into the next
+ * block. Returns the new end of the output. */
+typedef unsigned char *(*dashem_blocks_fn)(
+    const unsigned char *src,
+    size_t len,
+    unsigned char *dst,
+    uint64_t *carry
+);
+
+/* Processes the block p[0..block) that ends the input, so it needs no
+ * look-ahead. Bytes before skip are already done, and carry applies at skip.
+ * Writes the kept bytes to dst without writing at or past end, and returns
+ * the new end of the output. whole is non-NULL when nothing was removed
+ * before skip. It is where the output copy of p starts, so a block with
+ * nothing to remove can be stored there in one piece. */
+typedef unsigned char *(*dashem_last_fn)(
+    const unsigned char *p,
+    unsigned skip,
+    uint64_t carry,
+    unsigned char *dst,
+    const unsigned char *end,
+    unsigned char *whole
+);
+
+/* dashem_pack16 for the final block. Near the end of the output, the
+ * whole-group stores could pass end, so the kept bytes go through a copy. */
+DASHEM_TARGET("ssse3")
+static DASHEM_ALWAYS_INLINE unsigned char *dashem_pack16_end(
+    unsigned char *dst,
+    __m128i v,
+    uint32_t keep,
+    const unsigned char *end
 ) {
-    if (output_capacity < input_len) {
-        return -1;
+    if (LIKELY(end - dst >= 16)) {
+        return dashem_pack16(dst, v, keep);
     }
+    uint32_t lo = keep & 0xFF;
+    uint32_t hi = (keep >> 8) & 0xFF;
+    __m128i idx = _mm_set_epi64x(
+        (long long)(dashem_pack_lut[hi] + 0x0808080808080808ULL),
+        (long long)dashem_pack_lut[lo]);
+    unsigned char packed[16];
+    _mm_storeu_si128((__m128i *)packed, _mm_shuffle_epi8(v, idx));
+    memcpy(dst, packed, dashem_popcnt8[lo]);
+    dst += dashem_popcnt8[lo];
+    memcpy(dst, packed + 8, dashem_popcnt8[hi]);
+    return dst + dashem_popcnt8[hi];
+}
 
-    const unsigned char *in_ptr = (const unsigned char *)input;
-    unsigned char *out_ptr = (unsigned char *)output;
+/* 32 bytes per step as two SSE registers. */
+DASHEM_TARGET("ssse3")
+static unsigned char *dashem_blocks_ssse3(
+    const unsigned char *src,
+    size_t len,
+    unsigned char *dst,
+    uint64_t *carry_io
+) {
+    const __m128i pat_e2 = _mm_set1_epi8((char)0xE2);
+    const __m128i pat_80 = _mm_set1_epi8((char)0x80);
+    const __m128i pat_94 = _mm_set1_epi8((char)0x94);
+    uint32_t carry = (uint32_t)*carry_io;
 
-    /* Create patterns for all 3 bytes of em-dash */
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Woverflow"
-    const __m256i pattern_0xe2 = _mm256_set1_epi8((char)0xE2);
-    const __m256i pattern_0x80 = _mm256_set1_epi8((char)0x80);
-    const __m256i pattern_0x94 = _mm256_set1_epi8((char)0x94);
-#pragma GCC diagnostic pop
+    for (size_t i = 0; i < len; i += 32) {
+        const unsigned char *p = src + i;
+        __m128i lo = _mm_loadu_si128((const __m128i *)p);
+        __m128i hi = _mm_loadu_si128((const __m128i *)(p + 16));
+        __m128i e2_lo = _mm_cmpeq_epi8(lo, pat_e2);
+        __m128i e2_hi = _mm_cmpeq_epi8(hi, pat_e2);
 
-    /* PASS 1: Count em-dashes (pure SIMD, no output) */
-    size_t em_dash_count = 0;
-    size_t i = 0;
-
-    /* Process chunks with SIMD */
-    while (i + 34 <= input_len) {
-        /* Aggressive prefetching for better memory bandwidth */
-        if (i + 256 < input_len) {
-            _mm_prefetch(input + i + 256, _MM_HINT_T1);
-            _mm_prefetch(input + i + 320, _MM_HINT_T1);
-        }
-
-        __m256i v0 = _mm256_loadu_si256((__m256i *)(input + i));
-        __m256i v1 = _mm256_loadu_si256((__m256i *)(input + i + 1));
-        __m256i v2 = _mm256_loadu_si256((__m256i *)(input + i + 2));
-
-        /* Check all 3 bytes in parallel */
-        __m256i cmp0 = _mm256_cmpeq_epi8(v0, pattern_0xe2);
-        __m256i cmp1 = _mm256_cmpeq_epi8(v1, pattern_0x80);
-        __m256i cmp2 = _mm256_cmpeq_epi8(v2, pattern_0x94);
-
-        /* All 3 must match for a complete em-dash pattern */
-        __m256i full_match = _mm256_and_si256(cmp0, _mm256_and_si256(cmp1, cmp2));
-        uint32_t em_dash_mask = _mm256_movemask_epi8(full_match);
-
-        /* Count em-dashes in this chunk */
-        if (em_dash_mask != 0) {
-            while (em_dash_mask != 0) {
-                int match_offset = dashem_ctz(em_dash_mask);
-                em_dash_count++;
-
-                /* Clear this em-dash and its continuation bytes */
-                em_dash_mask &= ~(1u << match_offset);
-                if (match_offset + 1 < 32) {
-                    em_dash_mask &= ~(1u << (match_offset + 1));
-                }
-                if (match_offset + 2 < 32) {
-                    em_dash_mask &= ~(1u << (match_offset + 2));
-                }
-            }
-        }
-
-        i += 32;
-    }
-
-    /* Count remainder with scalar */
-    while (i + 3 <= input_len) {
-        if (in_ptr[i] == 0xE2 && in_ptr[i + 1] == 0x80 && in_ptr[i + 2] == 0x94) {
-            em_dash_count++;
-            i += 3;
-        } else {
-            i++;
-        }
-    }
-
-    /* OPTIMIZATION: If no em-dashes, single memcpy and return */
-    if (em_dash_count == 0) {
-        memcpy(output, input, input_len);
-        *output_len = input_len;
-        return 0;
-    }
-
-    /* PASS 2: Compact with known positions (single forward pass) */
-    size_t out_idx = 0;
-    i = 0;
-
-    /* Process with SIMD compaction */
-    while (i + 34 <= input_len) {
-        /* Aggressive prefetching for better memory bandwidth */
-        if (i + 256 < input_len) {
-            _mm_prefetch(input + i + 256, _MM_HINT_T1);
-            _mm_prefetch(input + i + 320, _MM_HINT_T1);
-        }
-        if (out_idx + 128 < output_capacity) {
-            _mm_prefetch(output + out_idx + 128, _MM_HINT_T1);
-        }
-
-        __m256i v0 = _mm256_loadu_si256((__m256i *)(input + i));
-        __m256i v1 = _mm256_loadu_si256((__m256i *)(input + i + 1));
-        __m256i v2 = _mm256_loadu_si256((__m256i *)(input + i + 2));
-
-        /* Check all 3 bytes in parallel */
-        __m256i cmp0 = _mm256_cmpeq_epi8(v0, pattern_0xe2);
-        __m256i cmp1 = _mm256_cmpeq_epi8(v1, pattern_0x80);
-        __m256i cmp2 = _mm256_cmpeq_epi8(v2, pattern_0x94);
-
-        /* All 3 must match for a complete em-dash pattern */
-        __m256i full_match = _mm256_and_si256(cmp0, _mm256_and_si256(cmp1, cmp2));
-        uint32_t em_dash_mask = _mm256_movemask_epi8(full_match);
-
-        /* Fast path: no em-dashes in this chunk */
-        if (em_dash_mask == 0) {
-            _mm256_storeu_si256((__m256i *)(out_ptr + out_idx), v0);
-            out_idx += 32;
-            i += 32;
+        /* Without a 0xE2 lead byte there is no em-dash to find. */
+        if (LIKELY(carry == 0 && _mm_movemask_epi8(_mm_or_si128(e2_lo, e2_hi)) == 0)) {
+            _mm_storeu_si128((__m128i *)dst, lo);
+            _mm_storeu_si128((__m128i *)(dst + 16), hi);
+            dst += 32;
             continue;
         }
 
-        /* Compact this chunk byte by byte (predictable branches now) */
-        size_t chunk_end = i + 32;
-        while (i < chunk_end) {
-            if ((em_dash_mask & 1) && i + 3 <= input_len &&
-                in_ptr[i] == 0xE2 && in_ptr[i + 1] == 0x80 && in_ptr[i + 2] == 0x94) {
-                /* Skip em-dash */
-                i += 3;
-                em_dash_mask >>= 3;
-                if (i >= chunk_end) break;
-            } else {
-                out_ptr[out_idx++] = in_ptr[i++];
-                em_dash_mask >>= 1;
-            }
-        }
-    }
+        __m128i match_lo = _mm_and_si128(e2_lo, _mm_and_si128(
+            _mm_cmpeq_epi8(_mm_loadu_si128((const __m128i *)(p + 1)), pat_80),
+            _mm_cmpeq_epi8(_mm_loadu_si128((const __m128i *)(p + 2)), pat_94)));
+        __m128i match_hi = _mm_and_si128(e2_hi, _mm_and_si128(
+            _mm_cmpeq_epi8(_mm_loadu_si128((const __m128i *)(p + 17)), pat_80),
+            _mm_cmpeq_epi8(_mm_loadu_si128((const __m128i *)(p + 18)), pat_94)));
+        uint32_t m = (uint32_t)_mm_movemask_epi8(match_lo)
+                   | ((uint32_t)_mm_movemask_epi8(match_hi) << 16);
 
-    /* Process remainder with scalar */
-    while (i < input_len) {
-        if (i + 3 <= input_len &&
-            in_ptr[i] == 0xE2 && in_ptr[i + 1] == 0x80 && in_ptr[i + 2] == 0x94) {
-            /* Skip em-dash */
-            i += 3;
-        } else {
-            out_ptr[out_idx++] = in_ptr[i++];
-        }
-    }
-
-    *output_len = out_idx;
-    return 0;
-}
-
-/**
- * @brief AVX2 with PSHUFB-based compaction (revolutionary performance)
- *
- * Uses PSHUFB (byte shuffle) for in-register compaction, completely
- * eliminating the memcpy fragmentation problem that made dense patterns slow.
- */
-static int dashem_remove_avx2_pshufb(
-    const char *input,
-    size_t input_len,
-    char *output,
-    size_t output_capacity,
-    size_t *output_len
-) {
-    if (output_capacity < input_len) {
-        return -1;
-    }
-
-    const unsigned char *in_ptr = (const unsigned char *)input;
-    unsigned char *out_ptr = (unsigned char *)output;
-    size_t out_idx = 0;
-    size_t i = 0;
-
-    /* Create patterns for all 3 bytes of em-dash */
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Woverflow"
-    const __m256i pattern_0xe2 = _mm256_set1_epi8((char)0xE2);
-    const __m256i pattern_0x80 = _mm256_set1_epi8((char)0x80);
-    const __m256i pattern_0x94 = _mm256_set1_epi8((char)0x94);
-#pragma GCC diagnostic pop
-
-    /* Process 32-byte chunks */
-    while (i + 34 <= input_len) {
-        /* Aggressive prefetching */
-        if (i + 256 < input_len) {
-            _mm_prefetch(input + i + 256, _MM_HINT_T1);
-            _mm_prefetch(input + i + 320, _MM_HINT_T1);
-        }
-
-        __m256i v0 = _mm256_loadu_si256((__m256i *)(input + i));
-        __m256i v1 = _mm256_loadu_si256((__m256i *)(input + i + 1));
-        __m256i v2 = _mm256_loadu_si256((__m256i *)(input + i + 2));
-
-        /* Check all 3 bytes in parallel */
-        __m256i cmp0 = _mm256_cmpeq_epi8(v0, pattern_0xe2);
-        __m256i cmp1 = _mm256_cmpeq_epi8(v1, pattern_0x80);
-        __m256i cmp2 = _mm256_cmpeq_epi8(v2, pattern_0x94);
-
-        /* All 3 must match for a complete em-dash pattern */
-        __m256i full_match = _mm256_and_si256(cmp0, _mm256_and_si256(cmp1, cmp2));
-        uint32_t em_dash_mask = _mm256_movemask_epi8(full_match);
-
-        /* Fast path: no em-dashes in this chunk */
-        if (em_dash_mask == 0) {
-            _mm256_storeu_si256((__m256i *)(out_ptr + out_idx), v0);
-            out_idx += 32;
-            i += 32;
+        if ((m | carry) == 0) {
+            _mm_storeu_si128((__m128i *)dst, lo);
+            _mm_storeu_si128((__m128i *)(dst + 16), hi);
+            dst += 32;
             continue;
         }
 
-        /* REVOLUTIONARY: Use PSHUFB for in-register compaction */
-        /* Build shuffle masks to keep only non-em-dash bytes */
-        uint8_t shuffle_lo[16], shuffle_hi[16];
-        int count_lo = 0, count_hi = 0;
-
-        /* Initialize shuffle masks to 0x80 (discard) */
-        for (int j = 0; j < 16; j++) {
-            shuffle_lo[j] = 0x80;
-            shuffle_hi[j] = 0x80;
-        }
-
-        /* Build shuffle indices for bytes to keep */
-        for (int j = 0; j < 32; j++) {
-            /* Check if this byte starts an em-dash */
-            if ((em_dash_mask & (1u << j)) != 0) {
-                /* Skip this byte and next 2 (the em-dash) */
-                /* Clear the bits for the continuation bytes */
-                if (j + 1 < 32) em_dash_mask &= ~(1u << (j + 1));
-                if (j + 2 < 32) em_dash_mask &= ~(1u << (j + 2));
-                j += 2; /* Skip next 2 bytes in loop */
-            } else {
-                /* Keep this byte */
-                if (j < 16) {
-                    if (count_lo < 16) shuffle_lo[count_lo++] = j;
-                } else {
-                    if (count_hi < 16) shuffle_hi[count_hi++] = j - 16;
-                }
-            }
-        }
-
-        /* Apply PSHUFB to compact bytes in-register */
-        __m128i mask_lo = _mm_loadu_si128((__m128i *)shuffle_lo);
-        __m128i mask_hi = _mm_loadu_si128((__m128i *)shuffle_hi);
-
-        /* Extract lanes, shuffle, and store compacted results */
-        __m128i v0_lo = _mm256_castsi256_si128(v0);
-        __m128i v0_hi = _mm256_extracti128_si256(v0, 1);
-
-        __m128i compacted_lo = _mm_shuffle_epi8(v0_lo, mask_lo);
-        __m128i compacted_hi = _mm_shuffle_epi8(v0_hi, mask_hi);
-
-        /* Store compacted bytes */
-        if (count_lo > 0) {
-            memcpy(out_ptr + out_idx, &compacted_lo, count_lo);
-            out_idx += count_lo;
-        }
-        if (count_hi > 0) {
-            memcpy(out_ptr + out_idx, &compacted_hi, count_hi);
-            out_idx += count_hi;
-        }
-
-        i += 32;
+        uint32_t keep = ~(m | m << 1 | m << 2 | carry);
+        carry = (m >> 30) | (m >> 31);
+        dst = dashem_pack16(dst, lo, keep);
+        dst = dashem_pack16(dst, hi, keep >> 16);
     }
 
-    /* Process remainder with scalar */
-    while (i < input_len) {
-        if (i + 3 <= input_len &&
-            in_ptr[i] == 0xE2 && in_ptr[i + 1] == 0x80 && in_ptr[i + 2] == 0x94) {
-            i += 3;
-        } else {
-            out_ptr[out_idx++] = in_ptr[i++];
-        }
-    }
-
-    *output_len = out_idx;
-    return 0;
+    *carry_io = carry;
+    return dst;
 }
 
-static int dashem_remove_avx2(
-    const char *input,
-    size_t input_len,
-    char *output,
-    size_t output_capacity,
-    size_t *output_len
+DASHEM_TARGET("ssse3")
+static unsigned char *dashem_last_ssse3(
+    const unsigned char *p,
+    unsigned skip,
+    uint64_t carry,
+    unsigned char *dst,
+    const unsigned char *end,
+    unsigned char *whole
 ) {
-    if (output_capacity < input_len) {
-        return -1;
+    const __m128i pat_e2 = _mm_set1_epi8((char)0xE2);
+    const __m128i pat_80 = _mm_set1_epi8((char)0x80);
+    const __m128i pat_94 = _mm_set1_epi8((char)0x94);
+    __m128i lo = _mm_loadu_si128((const __m128i *)p);
+    __m128i hi = _mm_loadu_si128((const __m128i *)(p + 16));
+    uint32_t e2 = (uint32_t)_mm_movemask_epi8(_mm_cmpeq_epi8(lo, pat_e2))
+                | ((uint32_t)_mm_movemask_epi8(_mm_cmpeq_epi8(hi, pat_e2)) << 16);
+    uint32_t b80 = (uint32_t)_mm_movemask_epi8(_mm_cmpeq_epi8(lo, pat_80))
+                 | ((uint32_t)_mm_movemask_epi8(_mm_cmpeq_epi8(hi, pat_80)) << 16);
+    uint32_t b94 = (uint32_t)_mm_movemask_epi8(_mm_cmpeq_epi8(lo, pat_94))
+                 | ((uint32_t)_mm_movemask_epi8(_mm_cmpeq_epi8(hi, pat_94)) << 16);
+    uint32_t live = ~0u << skip;
+    uint32_t m = e2 & (b80 >> 1) & (b94 >> 2) & live;
+    if ((m | carry) == 0) {
+        /* Nothing to remove: copy the rest as is. In place, the ranges may overlap. */
+        if (whole) {
+            _mm_storeu_si128((__m128i *)whole, lo);
+            _mm_storeu_si128((__m128i *)(whole + 16), hi);
+            return whole + 32;
+        }
+        memmove(dst, p + skip, 32 - skip);
+        return dst + (32 - skip);
     }
+    uint32_t keep = ~(m | m << 1 | m << 2 | (uint32_t)carry << skip) & live;
+    dst = dashem_pack16_end(dst, lo, keep, end);
+    return dashem_pack16_end(dst, hi, keep >> 16, end);
+}
 
-    size_t out_idx = 0;
-    size_t i = 0;
-    const unsigned char *in_ptr = (const unsigned char *)input;
-    unsigned char *out_ptr = (unsigned char *)output;
+DASHEM_TARGET("avx2")
+static DASHEM_ALWAYS_INLINE unsigned char *dashem_pack32(unsigned char *dst, __m256i v, uint32_t keep) {
+    if (keep == 0xFFFFFFFFu) {
+        _mm256_storeu_si256((__m256i *)dst, v);
+        return dst + 32;
+    }
+    dst = dashem_pack16(dst, _mm256_castsi256_si128(v), keep);
+    return dashem_pack16(dst, _mm256_extracti128_si256(v, 1), keep >> 16);
+}
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Woverflow"
+/* 64 bytes per step as two AVX2 registers. */
+DASHEM_TARGET("avx2")
+static unsigned char *dashem_blocks_avx2(
+    const unsigned char *src,
+    size_t len,
+    unsigned char *dst,
+    uint64_t *carry_io
+) {
     const __m256i pat_e2 = _mm256_set1_epi8((char)0xE2);
     const __m256i pat_80 = _mm256_set1_epi8((char)0x80);
     const __m256i pat_94 = _mm256_set1_epi8((char)0x94);
-#pragma GCC diagnostic pop
+    uint64_t carry = *carry_io;
 
-    /* Process 32-byte chunks. Need 34 readable bytes for overlapped loads at +1,+2. */
-    while (i + 34 <= input_len) {
-        __m256i v0 = _mm256_loadu_si256((const __m256i *)(input + i));
+    for (size_t i = 0; i < len; i += 64) {
+        const unsigned char *p = src + i;
+        __m256i lo = _mm256_loadu_si256((const __m256i *)p);
+        __m256i hi = _mm256_loadu_si256((const __m256i *)(p + 32));
+        __m256i e2_lo = _mm256_cmpeq_epi8(lo, pat_e2);
+        __m256i e2_hi = _mm256_cmpeq_epi8(hi, pat_e2);
+        __m256i any = _mm256_or_si256(e2_lo, e2_hi);
 
-        /* FAST PATH: Check for 0xE2 bytes first. If none, no em-dash is possible.
-         * This avoids 2 extra loads + 2 compares on the common (no em-dash) path. */
-        __m256i cmp0 = _mm256_cmpeq_epi8(v0, pat_e2);
-        uint32_t e2_mask = (uint32_t)_mm256_movemask_epi8(cmp0);
-
-        if (LIKELY(e2_mask == 0)) {
-            _mm256_storeu_si256((__m256i *)(out_ptr + out_idx), v0);
-            out_idx += 32;
-            i += 32;
+        /* Without a 0xE2 lead byte there is no em-dash to find. */
+        if (LIKELY(carry == 0 && _mm256_testz_si256(any, any))) {
+            _mm256_storeu_si256((__m256i *)dst, lo);
+            _mm256_storeu_si256((__m256i *)(dst + 32), hi);
+            dst += 64;
             continue;
         }
 
-        /* 0xE2 found - do full 3-byte pattern check with overlapped loads */
-        __m256i v1 = _mm256_loadu_si256((const __m256i *)(input + i + 1));
-        __m256i v2 = _mm256_loadu_si256((const __m256i *)(input + i + 2));
-        __m256i cmp1 = _mm256_cmpeq_epi8(v1, pat_80);
-        __m256i cmp2 = _mm256_cmpeq_epi8(v2, pat_94);
-        uint32_t mask = (uint32_t)_mm256_movemask_epi8(
-            _mm256_and_si256(cmp0, _mm256_and_si256(cmp1, cmp2)));
+        __m256i match_lo = _mm256_and_si256(e2_lo, _mm256_and_si256(
+            _mm256_cmpeq_epi8(_mm256_loadu_si256((const __m256i *)(p + 1)), pat_80),
+            _mm256_cmpeq_epi8(_mm256_loadu_si256((const __m256i *)(p + 2)), pat_94)));
+        __m256i match_hi = _mm256_and_si256(e2_hi, _mm256_and_si256(
+            _mm256_cmpeq_epi8(_mm256_loadu_si256((const __m256i *)(p + 33)), pat_80),
+            _mm256_cmpeq_epi8(_mm256_loadu_si256((const __m256i *)(p + 34)), pat_94)));
+        uint64_t m = (uint64_t)(uint32_t)_mm256_movemask_epi8(match_lo)
+                   | ((uint64_t)(uint32_t)_mm256_movemask_epi8(match_hi) << 32);
 
-        if (mask == 0) {
-            /* 0xE2 present but no full em-dash match */
-            _mm256_storeu_si256((__m256i *)(out_ptr + out_idx), v0);
-            out_idx += 32;
-            i += 32;
+        /* 0xE2 from other characters, such as curly quotes, but no em-dash. */
+        if ((m | carry) == 0) {
+            _mm256_storeu_si256((__m256i *)dst, lo);
+            _mm256_storeu_si256((__m256i *)(dst + 32), hi);
+            dst += 64;
             continue;
         }
 
-        /* Choose strategy based on match density */
-        int match_count = DASHEM_POPCOUNT(mask);
-
-        if (LIKELY(match_count <= 2)) {
-            /* SPARSE: CTZ-based gap copying - efficient for few matches */
-            size_t wp = i;
-            while (mask != 0) {
-                int bit = dashem_ctz(mask);
-                size_t match_pos = i + bit;
-
-                /* Copy bytes between last write position and this match */
-                if (match_pos > wp) {
-                    size_t gap = match_pos - wp;
-                    memcpy(out_ptr + out_idx, input + wp, gap);
-                    out_idx += gap;
-                }
-
-                /* Skip the 3-byte em-dash */
-                wp = match_pos + 3;
-
-                /* Clear this match bit and continuation byte bits */
-                mask &= ~(1u << bit);
-                if (bit + 1 < 32) mask &= ~(1u << (bit + 1));
-                if (bit + 2 < 32) mask &= ~(1u << (bit + 2));
-            }
-
-            /* Copy remaining bytes from this chunk */
-            size_t chunk_end = i + 32;
-            if (wp <= chunk_end) {
-                if (wp < chunk_end) {
-                    memcpy(out_ptr + out_idx, input + wp, chunk_end - wp);
-                    out_idx += chunk_end - wp;
-                }
-                i = chunk_end;
-            } else {
-                /* Em-dash spans into next chunk territory - skip past it */
-                i = wp;
-            }
-        } else {
-            /* DENSE: Mask-expansion + bit-extract approach.
-             * Expand em-dash start mask to cover all 3 bytes, then extract
-             * only kept bytes using CTZ. Much fewer iterations than byte-by-byte. */
-            uint32_t remove = mask | (mask << 1) | (mask << 2);
-            uint32_t keep = ~remove;
-
-            /* Extract kept bytes using bit iteration */
-            while (keep != 0) {
-                int pos = dashem_ctz(keep);
-                out_ptr[out_idx++] = in_ptr[i + pos];
-                keep &= keep - 1;  /* Clear lowest set bit */
-            }
-
-            /* Handle boundary-spanning em-dashes (start at position 30 or 31) */
-            if (mask & 0x80000000u) {
-                i += 34;  /* Em-dash at pos 31: skip bytes 32, 33 in next chunk */
-            } else if (mask & 0x40000000u) {
-                i += 33;  /* Em-dash at pos 30: skip byte 32 in next chunk */
-            } else {
-                i += 32;
-            }
-        }
+        uint64_t keep = ~(m | m << 1 | m << 2 | carry);
+        carry = (m >> 62) | (m >> 63);
+        dst = dashem_pack32(dst, lo, (uint32_t)keep);
+        dst = dashem_pack32(dst, hi, (uint32_t)(keep >> 32));
     }
 
-    /* Scalar remainder */
-    while (i < input_len) {
-        if (i + 3 <= input_len &&
-            in_ptr[i] == 0xE2 &&
-            in_ptr[i + 1] == 0x80 &&
-            in_ptr[i + 2] == 0x94) {
-            i += 3;
-        } else {
-            out_ptr[out_idx++] = in_ptr[i++];
-        }
-    }
-
-    *output_len = out_idx;
-    return 0;
+    *carry_io = carry;
+    return dst;
 }
 
-/* 64-byte unrolled AVX2 variant for improved instruction-level parallelism */
-static int dashem_remove_avx2_unrolled(
-    const char *input,
-    size_t input_len,
-    char *output,
-    size_t output_capacity,
-    size_t *output_len
+DASHEM_TARGET("avx2")
+static unsigned char *dashem_last_avx2(
+    const unsigned char *p,
+    unsigned skip,
+    uint64_t carry,
+    unsigned char *dst,
+    const unsigned char *end,
+    unsigned char *whole
 ) {
-    if (output_capacity < input_len) {
-        return -1;
-    }
-
-    size_t out_idx = 0;
-    size_t i = 0;
-    const unsigned char *in_ptr = (const unsigned char *)input;
-    unsigned char *out_ptr = (unsigned char *)output;
-
-    /* Create patterns for all 3 bytes of em-dash */
-    /* Note: Using signed char patterns is intentional for SIMD operations */
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Woverflow"
-    const __m256i pattern_0xe2 = _mm256_set1_epi8((char)0xE2);
-    const __m256i pattern_0x80 = _mm256_set1_epi8((char)0x80);
-    const __m256i pattern_0x94 = _mm256_set1_epi8((char)0x94);
-#pragma GCC diagnostic pop
-
-    /* Process 64 bytes at a time (two 32-byte chunks) with unrolled loop.
-     * Note: Loop condition is i + 66 (not 64) to account for overlapped loads
-     * at +33 and +34 byte offsets which would otherwise overread the buffer. */
-    while (i + 66 <= input_len) {
-        /* Software prefetch for upcoming iterations (2 iterations ahead) */
-        if (i + 128 < input_len) {
-            _mm_prefetch(input + i + 128, _MM_HINT_T0);
-            _mm_prefetch(input + i + 160, _MM_HINT_T0);
+    const __m256i pat_e2 = _mm256_set1_epi8((char)0xE2);
+    const __m256i pat_80 = _mm256_set1_epi8((char)0x80);
+    const __m256i pat_94 = _mm256_set1_epi8((char)0x94);
+    __m256i lo = _mm256_loadu_si256((const __m256i *)p);
+    __m256i hi = _mm256_loadu_si256((const __m256i *)(p + 32));
+    uint64_t e2 = (uint64_t)(uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(lo, pat_e2))
+                | ((uint64_t)(uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(hi, pat_e2)) << 32);
+    uint64_t b80 = (uint64_t)(uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(lo, pat_80))
+                 | ((uint64_t)(uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(hi, pat_80)) << 32);
+    uint64_t b94 = (uint64_t)(uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(lo, pat_94))
+                 | ((uint64_t)(uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(hi, pat_94)) << 32);
+    uint64_t live = ~0ULL << skip;
+    uint64_t m = e2 & (b80 >> 1) & (b94 >> 2) & live;
+    if ((m | carry) == 0) {
+        /* Nothing to remove: copy the rest as is. In place, the ranges may overlap. */
+        if (whole) {
+            _mm256_storeu_si256((__m256i *)whole, lo);
+            _mm256_storeu_si256((__m256i *)(whole + 32), hi);
+            return whole + 64;
         }
+        memmove(dst, p + skip, 64 - skip);
+        return dst + (64 - skip);
+    }
+    uint64_t keep = ~(m | m << 1 | m << 2 | carry << skip) & live;
+    dst = dashem_pack16_end(dst, _mm256_castsi256_si128(lo), (uint32_t)keep, end);
+    dst = dashem_pack16_end(dst, _mm256_extracti128_si256(lo, 1), (uint32_t)(keep >> 16), end);
+    dst = dashem_pack16_end(dst, _mm256_castsi256_si128(hi), (uint32_t)(keep >> 32), end);
+    return dashem_pack16_end(dst, _mm256_extracti128_si256(hi, 1), (uint32_t)(keep >> 48), end);
+}
 
-        /* First 32-byte chunk */
-        __m256i v0_a = _mm256_loadu_si256((__m256i *)(input + i));
-        __m256i v1_a = _mm256_loadu_si256((__m256i *)(input + i + 1));
-        __m256i v2_a = _mm256_loadu_si256((__m256i *)(input + i + 2));
+#if defined(DASHEM_X86_AVX512)
+/* 64 bytes per step in one ZMM register, packed with VPCOMPRESSB. */
+DASHEM_TARGET("avx512f,avx512bw,avx512vbmi2,popcnt")
+static unsigned char *dashem_blocks_avx512(
+    const unsigned char *src,
+    size_t len,
+    unsigned char *dst,
+    uint64_t *carry_io
+) {
+    const __m512i pat_e2 = _mm512_set1_epi8((char)0xE2);
+    const __m512i pat_80 = _mm512_set1_epi8((char)0x80);
+    const __m512i pat_94 = _mm512_set1_epi8((char)0x94);
+    uint64_t carry = *carry_io;
 
-        /* Second 32-byte chunk */
-        __m256i v0_b = _mm256_loadu_si256((__m256i *)(input + i + 32));
-        __m256i v1_b = _mm256_loadu_si256((__m256i *)(input + i + 33));
-        __m256i v2_b = _mm256_loadu_si256((__m256i *)(input + i + 34));
+    for (size_t i = 0; i < len; i += 64) {
+        const unsigned char *p = src + i;
+        __m512i v = _mm512_loadu_si512((const void *)p);
+        uint64_t e2 = (uint64_t)_mm512_cmpeq_epi8_mask(v, pat_e2);
 
-        /* Compare first chunk */
-        __m256i cmp0_a = _mm256_cmpeq_epi8(v0_a, pattern_0xe2);
-        __m256i cmp1_a = _mm256_cmpeq_epi8(v1_a, pattern_0x80);
-        __m256i cmp2_a = _mm256_cmpeq_epi8(v2_a, pattern_0x94);
-        __m256i full_match_a = _mm256_and_si256(cmp0_a, _mm256_and_si256(cmp1_a, cmp2_a));
-        uint32_t mask_a = _mm256_movemask_epi8(full_match_a);
-
-        /* Compare second chunk */
-        __m256i cmp0_b = _mm256_cmpeq_epi8(v0_b, pattern_0xe2);
-        __m256i cmp1_b = _mm256_cmpeq_epi8(v1_b, pattern_0x80);
-        __m256i cmp2_b = _mm256_cmpeq_epi8(v2_b, pattern_0x94);
-        __m256i full_match_b = _mm256_and_si256(cmp0_b, _mm256_and_si256(cmp1_b, cmp2_b));
-        uint32_t mask_b = _mm256_movemask_epi8(full_match_b);
-
-        /* Fast path: no em-dashes in either chunk */
-        if (mask_a == 0 && mask_b == 0) {
-            memcpy(out_ptr + out_idx, input + i, 64);
-            out_idx += 64;
-            i += 64;
+        /* Without a 0xE2 lead byte there is no em-dash to find. */
+        if (LIKELY((e2 | carry) == 0)) {
+            _mm512_storeu_si512((void *)dst, v);
+            dst += 64;
             continue;
         }
 
-        /* Process first chunk if it has matches */
-        size_t write_pos = i;
-        if (mask_a != 0) {
-            size_t processed = 0;
-            while (mask_a != 0) {
-                int match_offset = dashem_ctz(mask_a);
-                size_t match_pos = i + processed + match_offset;
-
-                if (match_pos > write_pos) {
-                    size_t copy_len = match_pos - write_pos;
-                    memcpy(out_ptr + out_idx, input + write_pos, copy_len);
-                    out_idx += copy_len;
-                }
-
-                write_pos = match_pos + 3;
-                processed += match_offset + 3;
-                mask_a >>= (match_offset + 3);
-            }
-
-            size_t chunk_end = i + 32;
-            if (write_pos < chunk_end) {
-                size_t remaining = chunk_end - write_pos;
-                memcpy(out_ptr + out_idx, input + write_pos, remaining);
-                out_idx += remaining;
-            }
-            write_pos = i + 32;
-        }
-
-        /* Process second chunk if it has matches */
-        if (mask_b != 0) {
-            size_t processed = 0;
-            while (mask_b != 0) {
-                int match_offset = dashem_ctz(mask_b);
-                size_t match_pos = i + 32 + processed + match_offset;
-
-                if (match_pos > write_pos) {
-                    size_t copy_len = match_pos - write_pos;
-                    memcpy(out_ptr + out_idx, input + write_pos, copy_len);
-                    out_idx += copy_len;
-                }
-
-                write_pos = match_pos + 3;
-                processed += match_offset + 3;
-                mask_b >>= (match_offset + 3);
-            }
-
-            size_t chunk_end = i + 64;
-            if (write_pos < chunk_end) {
-                size_t remaining = chunk_end - write_pos;
-                memcpy(out_ptr + out_idx, input + write_pos, remaining);
-                out_idx += remaining;
-            }
-        } else {
-            /* No matches in second chunk, copy remaining bytes */
-            size_t chunk_end = i + 64;
-            if (write_pos < chunk_end) {
-                size_t remaining = chunk_end - write_pos;
-                memcpy(out_ptr + out_idx, input + write_pos, remaining);
-                out_idx += remaining;
-            }
-        }
-
-        i += 64;
+        uint64_t m = e2
+                   & (uint64_t)_mm512_cmpeq_epi8_mask(_mm512_loadu_si512((const void *)(p + 1)), pat_80)
+                   & (uint64_t)_mm512_cmpeq_epi8_mask(_mm512_loadu_si512((const void *)(p + 2)), pat_94);
+        uint64_t keep = ~(m | m << 1 | m << 2 | carry);
+        carry = (m >> 62) | (m >> 63);
+        /* Compress in a register, then store: the memory form of VPCOMPRESSB
+         * is microcoded and slow on AMD Zen 4. */
+        _mm512_storeu_si512((void *)dst, _mm512_maskz_compress_epi8(keep, v));
+        dst += DASHEM_POPCOUNTLL(keep);
     }
 
-    /* Process remaining bytes with single 32-byte chunks.
-     * Note: Loop condition is i + 34 (not 32) to account for overlapped loads
-     * at +1 and +2 byte offsets which would otherwise overread the buffer. */
-    while (i + 34 <= input_len) {
-        __m256i v0 = _mm256_loadu_si256((__m256i *)(input + i));
-        __m256i v1 = _mm256_loadu_si256((__m256i *)(input + i + 1));
-        __m256i v2 = _mm256_loadu_si256((__m256i *)(input + i + 2));
+    *carry_io = carry;
+    return dst;
+}
 
-        __m256i cmp0 = _mm256_cmpeq_epi8(v0, pattern_0xe2);
-        __m256i cmp1 = _mm256_cmpeq_epi8(v1, pattern_0x80);
-        __m256i cmp2 = _mm256_cmpeq_epi8(v2, pattern_0x94);
+/* Removes em-dashes from the bytes of v selected by live, which end the
+ * input. Stores only the kept bytes. */
+DASHEM_TARGET("avx512f,avx512bw,avx512vbmi2,popcnt")
+static DASHEM_ALWAYS_INLINE unsigned char *dashem_final_avx512(
+    __m512i v,
+    uint64_t live,
+    uint64_t carry_at_skip,
+    unsigned char *dst
+) {
+    uint64_t e2 = (uint64_t)_mm512_cmpeq_epi8_mask(v, _mm512_set1_epi8((char)0xE2));
+    uint64_t b80 = (uint64_t)_mm512_cmpeq_epi8_mask(v, _mm512_set1_epi8((char)0x80));
+    uint64_t b94 = (uint64_t)_mm512_cmpeq_epi8_mask(v, _mm512_set1_epi8((char)0x94));
+    uint64_t m = e2 & (b80 >> 1) & (b94 >> 2) & live;
+    uint64_t keep = ~(m | m << 1 | m << 2 | carry_at_skip) & live;
+    unsigned kept = (unsigned)DASHEM_POPCOUNTLL(keep);
+    uint64_t store = kept == 64 ? ~0ULL : (1ULL << kept) - 1;
+    _mm512_mask_storeu_epi8((void *)dst, store, _mm512_maskz_compress_epi8(keep, v));
+    return dst + kept;
+}
 
-        __m256i full_match = _mm256_and_si256(cmp0, _mm256_and_si256(cmp1, cmp2));
-        uint32_t em_dash_mask = _mm256_movemask_epi8(full_match);
+DASHEM_TARGET("avx512f,avx512bw,avx512vbmi2,popcnt")
+static unsigned char *dashem_last_avx512(
+    const unsigned char *p,
+    unsigned skip,
+    uint64_t carry,
+    unsigned char *dst,
+    const unsigned char *end,
+    unsigned char *whole
+) {
+    (void)end;
+    (void)whole;
+    return dashem_final_avx512(_mm512_loadu_si512((const void *)p), ~0ULL << skip, carry << skip, dst);
+}
 
-        if (em_dash_mask == 0) {
-            memcpy(out_ptr + out_idx, input + i, 32);
-            out_idx += 32;
-            i += 32;
-            continue;
-        }
-
-        size_t write_pos = i;
-        size_t processed = 0;
-
-        while (em_dash_mask != 0) {
-            int match_offset = dashem_ctz(em_dash_mask);
-            size_t match_pos = i + processed + match_offset;
-
-            if (match_pos > write_pos) {
-                size_t copy_len = match_pos - write_pos;
-                memcpy(out_ptr + out_idx, input + write_pos, copy_len);
-                out_idx += copy_len;
-            }
-
-            write_pos = match_pos + 3;
-            processed += match_offset + 3;
-            int shift_amount = match_offset + 3;
-            if (shift_amount >= 32) {
-                em_dash_mask = 0;
-            } else {
-            em_dash_mask >>= shift_amount;
-            }
-        }
-
-        size_t chunk_end = i + 32;
-        if (write_pos < chunk_end) {
-            size_t remaining = chunk_end - write_pos;
-            memcpy(out_ptr + out_idx, input + write_pos, remaining);
-            out_idx += remaining;
-        }
-
-        i = chunk_end;
-    }
-
-    /* Process remainder with scalar */
-    while (i < input_len) {
-        if (i + 3 <= input_len &&
-            in_ptr[i] == 0xE2 &&
-            in_ptr[i + 1] == 0x80 &&
-            in_ptr[i + 2] == 0x94) {
-            i += 3;
-        } else {
-            out_ptr[out_idx++] = in_ptr[i++];
-        }
-    }
-
-    *output_len = out_idx;
-    return 0;
+/* Input shorter than 64 bytes: a masked load reads only the input bytes. */
+DASHEM_TARGET("avx512f,avx512bw,avx512vbmi2,popcnt")
+static unsigned char *dashem_short_avx512(const unsigned char *src, size_t len, unsigned char *dst) {
+    uint64_t live = (1ULL << len) - 1;
+    return dashem_final_avx512(_mm512_maskz_loadu_epi8(live, (const void *)src), live, 0, dst);
 }
 #endif
 
-/* ============================================================================
- * SIMD Implementation - AVX-512F (64-byte unrolled vectorization)
- * ============================================================================ */
-
-#if defined(__AVX512F__)
-    #include <immintrin.h>
-
-static int dashem_remove_avx512(
+/* Runs a kernel over the whole input. block is the kernel's step size, a power
+ * of two no larger than 64, and input_len is at least block. Inlined into each
+ * kernel so that blocks and last become direct calls. */
+static DASHEM_ALWAYS_INLINE int dashem_run_blocks(
+    dashem_blocks_fn blocks,
+    dashem_last_fn last,
+    size_t block,
     const char *input,
     size_t input_len,
     char *output,
-    size_t output_capacity,
     size_t *output_len
 ) {
-    if (output_capacity < input_len) {
-        return -1;
+    const unsigned char *src = (const unsigned char *)input;
+    unsigned char *dst = (unsigned char *)output;
+    uint64_t carry = 0;
+
+    /* Whole blocks that have their 2 bytes of look-ahead inside the input. */
+    size_t body = input_len >= block + 2 ? (input_len - 2) & ~(block - 1) : 0;
+    size_t start = 0;
+
+    /* In place, the bytes before the first 0xE2 do not move. Skip them
+     * without rewriting. No em-dash can span the skipped prefix. */
+    if ((const void *)src == (const void *)dst && body > 0) {
+        const unsigned char *hit = (const unsigned char *)memchr(src, 0xE2, body);
+        start = (hit ? (size_t)(hit - src) : body) & ~(block - 1);
+        dst += start;
     }
 
-    size_t out_idx = 0;
-    size_t i = 0;
-    const unsigned char *in_ptr = (const unsigned char *)input;
-    unsigned char *out_ptr = (unsigned char *)output;
+    dst = blocks(src + start, body - start, dst, &carry);
 
-    /* Create patterns for all 3 bytes of em-dash */
-    const __m512i pattern_0xe2 = _mm512_set1_epi8((char)0xE2);
-    const __m512i pattern_0x80 = _mm512_set1_epi8((char)0x80);
-    const __m512i pattern_0x94 = _mm512_set1_epi8((char)0x94);
-
-    /* Process 64 bytes at a time (single 512-bit vector) with overlap for multi-byte patterns */
-    while (i + 64 <= input_len) {
-        /* Software prefetch for upcoming iterations */
-        if (i + 128 < input_len) {
-            _mm_prefetch(input + i + 128, _MM_HINT_T0);
-        }
-
-        /* Load three overlapping 64-byte chunks to match the 3-byte pattern */
-        __m512i v0 = _mm512_loadu_si512((__m512i *)(input + i));
-        __m512i v1 = _mm512_loadu_si512((__m512i *)(input + i + 1));
-        __m512i v2 = _mm512_loadu_si512((__m512i *)(input + i + 2));
-
-        /* Compare each byte position using masks (AVX-512F style) */
-        __mmask64 cmp0 = _mm512_cmpeq_epu8_mask(v0, pattern_0xe2);
-        __mmask64 cmp1 = _mm512_cmpeq_epu8_mask(v1, pattern_0x80);
-        __mmask64 cmp2 = _mm512_cmpeq_epu8_mask(v2, pattern_0x94);
-
-        /* All 3 must match for a complete em-dash pattern */
-        uint64_t match_mask = cmp0 & cmp1 & cmp2;
-
-        /* Fast path: no em-dashes in this chunk */
-        if (match_mask == 0) {
-            memcpy(out_ptr + out_idx, input + i, 64);
-            out_idx += 64;
-            i += 64;
-            continue;
-        }
-
-        /* Process matches using CTZ-based iteration */
-        size_t write_pos = i;
-        size_t processed = 0;
-
-        while (match_mask != 0) {
-            /* Use 64-bit CTZ for 64-bit mask - critical for correctness */
-            int match_offset = dashem_ctzll(match_mask);
-            size_t match_pos = i + processed + match_offset;
-
-            if (match_pos > write_pos) {
-                size_t copy_len = match_pos - write_pos;
-                memcpy(out_ptr + out_idx, input + write_pos, copy_len);
-                out_idx += copy_len;
-            }
-
-            write_pos = match_pos + 3;
-            processed += match_offset + 3;
-            match_mask >>= (match_offset + 3);
-        }
-
-        /* Copy any remaining bytes from this chunk */
-        size_t chunk_end = i + 64;
-        if (write_pos < chunk_end) {
-            size_t remaining = chunk_end - write_pos;
-            memcpy(out_ptr + out_idx, input + write_pos, remaining);
-            out_idx += remaining;
-        }
-
-        i += 64;
-    }
-
-    /* Process remaining bytes with 32-byte AVX2 fallback */
-    while (i + 32 <= input_len) {
-        __m256i v0 = _mm256_loadu_si256((__m256i *)(input + i));
-        __m256i v1 = _mm256_loadu_si256((__m256i *)(input + i + 1));
-        __m256i v2 = _mm256_loadu_si256((__m256i *)(input + i + 2));
-
-        __m256i cmp0 = _mm256_cmpeq_epi8(v0, _mm256_set1_epi8((char)0xE2));
-        __m256i cmp1 = _mm256_cmpeq_epi8(v1, _mm256_set1_epi8((char)0x80));
-        __m256i cmp2 = _mm256_cmpeq_epi8(v2, _mm256_set1_epi8((char)0x94));
-
-        __m256i full_match = _mm256_and_si256(cmp0, _mm256_and_si256(cmp1, cmp2));
-        uint32_t em_dash_mask = _mm256_movemask_epi8(full_match);
-
-        if (em_dash_mask == 0) {
-            memcpy(out_ptr + out_idx, input + i, 32);
-            out_idx += 32;
-            i += 32;
-            continue;
-        }
-
-        size_t write_pos = i;
-        size_t processed = 0;
-
-        while (em_dash_mask != 0) {
-            int match_offset = dashem_ctz(em_dash_mask);
-            size_t match_pos = i + processed + match_offset;
-
-            if (match_pos > write_pos) {
-                size_t copy_len = match_pos - write_pos;
-                memcpy(out_ptr + out_idx, input + write_pos, copy_len);
-                out_idx += copy_len;
-            }
-
-            write_pos = match_pos + 3;
-            processed += match_offset + 3;
-            int shift_amount = match_offset + 3;
-            if (shift_amount >= 32) {
-                em_dash_mask = 0;
-            } else {
-            em_dash_mask >>= shift_amount;
-            }
-        }
-
-        size_t chunk_end = i + 32;
-        if (write_pos < chunk_end) {
-            size_t remaining = chunk_end - write_pos;
-            memcpy(out_ptr + out_idx, input + write_pos, remaining);
-            out_idx += remaining;
-        }
-
-        i = chunk_end;
-    }
-
-    /* Process remainder with scalar */
-    while (i < input_len) {
-        if (i + 3 <= input_len &&
-            in_ptr[i] == 0xE2 &&
-            in_ptr[i + 1] == 0x80 &&
-            in_ptr[i + 2] == 0x94) {
-            i += 3;
+    /* The rest is 2 to block + 1 bytes. A final block aligned to the end of
+     * the input covers all but at most one byte, handled here first. */
+    size_t i = body;
+    if (input_len - i > block) {
+        if (carry & 1) {
+            carry >>= 1;
+        } else if (src[i] == 0xE2 && src[i + 1] == 0x80 && src[i + 2] == 0x94) {
+            carry = 3;
         } else {
-            out_ptr[out_idx++] = in_ptr[i++];
+            *dst++ = src[i];
         }
+        i++;
     }
 
-    *output_len = out_idx;
+    /* The final block overlaps bytes already done, and skip masks them out.
+     * In place, those bytes may hold output already, but only bytes from
+     * skip on affect the result. */
+    size_t q = input_len - block;
+    unsigned char *whole = dst == (unsigned char *)output + i ? (unsigned char *)output + q : NULL;
+    dst = last(src + q, (unsigned)(i - q), carry, dst, (unsigned char *)output + input_len, whole);
+
+    *output_len = (size_t)(dst - (unsigned char *)output);
     return 0;
 }
 
-/**
- * @brief REVOLUTIONARY: AVX-512 VBMI2 implementation using VPCOMPRESSB
- *
- * This implementation uses the hardware-accelerated VPCOMPRESSB instruction
- * to directly compact bytes based on a mask, eliminating all memcpy overhead.
- * This provides 15-30x speedup on dense em-dash patterns.
- *
- * Available on: Intel Ice Lake (2019+), Tiger Lake, Rocket Lake, Alder Lake
- * NOT available on: AMD (as of 2024)
- */
-#if defined(__AVX512VBMI2__) && defined(__AVX512BW__)
-static int dashem_remove_avx512_compress(
+/* Inputs shorter than one block go to the scalar code. */
+static int dashem_remove_short(
     const char *input,
     size_t input_len,
     char *output,
-    size_t output_capacity,
     size_t *output_len
 ) {
-    if (output_capacity < input_len) {
-        return -1;
+    if ((const void *)input == (const void *)output) {
+        return dashem_remove_insitu(input, input_len, output_len);
     }
-
-    size_t out_idx = 0;
-    size_t i = 0;
-    const unsigned char *in_ptr = (const unsigned char *)input;
-    unsigned char *out_ptr = (unsigned char *)output;
-
-    /* Create patterns for all 3 bytes of em-dash */
-    const __m512i pattern_e2 = _mm512_set1_epi8((char)0xE2);
-    const __m512i pattern_80 = _mm512_set1_epi8((char)0x80);
-    const __m512i pattern_94 = _mm512_set1_epi8((char)0x94);
-
-    /* Process 61 bytes at a time to avoid boundary-spanning em-dashes
-     * We load 64 bytes for pattern detection, but only output 61 bytes.
-     * This creates a 3-byte overlap ensuring any em-dash is fully contained. */
-    while (i + 64 <= input_len) {  /* Need 64 bytes for overlapped reads at +1, +2 */
-        /* Prefetch for next iteration */
-        if (i + 128 < input_len) {
-            _mm_prefetch(input + i + 128, _MM_HINT_T0);
-        }
-
-        /* Load main vector and overlapping vectors for pattern detection */
-        __m512i v0 = _mm512_loadu_si512((__m512i *)(input + i));
-        __m512i v1 = _mm512_loadu_si512((__m512i *)(input + i + 1));
-        __m512i v2 = _mm512_loadu_si512((__m512i *)(input + i + 2));
-
-        /* Detect em-dash starts using mask operations */
-        __mmask64 match_e2 = _mm512_cmpeq_epi8_mask(v0, pattern_e2);
-        __mmask64 match_80 = _mm512_cmpeq_epi8_mask(v1, pattern_80);
-        __mmask64 match_94 = _mm512_cmpeq_epi8_mask(v2, pattern_94);
-
-        /* Full em-dash pattern: all three bytes must match */
-        __mmask64 em_dash_start = match_e2 & match_80 & match_94;
-
-        /* CRITICAL: Only process first 61 bytes to avoid boundary issues.
-         * Mask restricts processing to bits 0-60 (61 bytes total).
-         * Bits 61-63 will be re-processed in next iteration. */
-        const __mmask64 process_mask = 0x1FFFFFFFFFFFFFFFULL;  /* Bits 0-60 (61 bytes) */
-
-        if ((em_dash_start & process_mask) == 0) {
-            /* Fast path: no em-dashes in first 61 bytes
-             * Only store 61 bytes using mask */
-            _mm512_mask_storeu_epi8(out_ptr + out_idx, process_mask, v0);
-            out_idx += 61;
-            i += 61;
-            continue;
-        }
-
-        /* Only process em-dashes in first 61 bytes */
-        em_dash_start &= process_mask;
-
-        /* Create mask for bytes to KEEP (exclude em-dash bytes) */
-        __mmask64 keep_mask = ~em_dash_start & process_mask;
-
-        /* Also exclude bytes 2 and 3 of each em-dash (safe - all within 61 bytes) */
-        __mmask64 em_dash_byte2 = em_dash_start << 1;
-        __mmask64 em_dash_byte3 = em_dash_start << 2;
-
-        /* Mask out all 3 bytes of each em-dash */
-        keep_mask &= ~em_dash_byte2;
-        keep_mask &= ~em_dash_byte3;
-
-        /* Hardware-accelerated byte compaction */
-        _mm512_mask_compressstoreu_epi8(out_ptr + out_idx, keep_mask, v0);
-
-        /* Update output index by counting kept bytes */
-        out_idx += DASHEM_POPCOUNTLL(keep_mask);
-
-        /* Advance by 61 bytes (3-byte overlap for next iteration) */
-        i += 61;
-    }
-
-    /* Process remainder with scalar fallback */
-    while (i < input_len) {
-        if (i + 3 <= input_len &&
-            in_ptr[i] == 0xE2 &&
-            in_ptr[i + 1] == 0x80 &&
-            in_ptr[i + 2] == 0x94) {
-            /* Skip em-dash */
-            i += 3;
-        } else {
-            out_ptr[out_idx++] = in_ptr[i++];
-        }
-    }
-
-    *output_len = out_idx;
-    return 0;
+    return dashem_remove_scalar(input, input_len, output, input_len, output_len);
 }
-#endif  /* AVX512VBMI2 */
-#endif  /* AVX512F */
 
-/* ============================================================================
- * SIMD Implementation - SSE4.2
- * ============================================================================ */
-
-#if defined(__SSE4_2__)
-    #include <nmmintrin.h>
-
+DASHEM_TARGET("ssse3")
 static int dashem_remove_sse42(
     const char *input,
     size_t input_len,
@@ -1384,243 +959,56 @@ static int dashem_remove_sse42(
     size_t output_capacity,
     size_t *output_len
 ) {
-    if (output_capacity < input_len) {
-        return -1;
+    (void)output_capacity;
+    if (input_len < 32) {
+        return dashem_remove_short(input, input_len, output, output_len);
     }
-
-    size_t out_idx = 0;
-    size_t i = 0;
-    const unsigned char *in_ptr = (const unsigned char *)input;
-    unsigned char *out_ptr = (unsigned char *)output;
-
-    /* Create patterns for all 3 bytes of em-dash */
-    /* Note: Using signed char patterns is intentional for SIMD operations */
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Woverflow"
-    const __m128i pattern_0xe2 = _mm_set1_epi8((char)0xE2);
-    const __m128i pattern_0x80 = _mm_set1_epi8((char)0x80);
-    const __m128i pattern_0x94 = _mm_set1_epi8((char)0x94);
-#pragma GCC diagnostic pop
-
-    /* Process 16 bytes at a time. Need 18 readable bytes for overlapped loads. */
-    while (i + 18 <= input_len) {
-        __m128i v0 = _mm_loadu_si128((const __m128i *)(input + i));
-
-        /* Quick check for 0xE2 bytes first */
-        __m128i cmp0 = _mm_cmpeq_epi8(v0, pattern_0xe2);
-        uint32_t e2_mask = (uint32_t)_mm_movemask_epi8(cmp0);
-
-        if (LIKELY(e2_mask == 0)) {
-            _mm_storeu_si128((__m128i *)(out_ptr + out_idx), v0);
-            out_idx += 16;
-            i += 16;
-            continue;
-        }
-
-        /* Full pattern check with overlapped loads */
-        __m128i v1 = _mm_loadu_si128((const __m128i *)(input + i + 1));
-        __m128i v2 = _mm_loadu_si128((const __m128i *)(input + i + 2));
-        __m128i cmp1 = _mm_cmpeq_epi8(v1, pattern_0x80);
-        __m128i cmp2 = _mm_cmpeq_epi8(v2, pattern_0x94);
-
-        __m128i full_match = _mm_and_si128(cmp0, _mm_and_si128(cmp1, cmp2));
-        uint32_t em_dash_mask = (uint32_t)_mm_movemask_epi8(full_match);
-
-        /* Fast path: 0xE2 present but no full em-dash match */
-        if (em_dash_mask == 0) {
-            _mm_storeu_si128((__m128i *)(out_ptr + out_idx), v0);
-            out_idx += 16;
-            i += 16;
-            continue;
-        }
-
-        /* Choose strategy based on match density */
-        int match_count = DASHEM_POPCOUNT(em_dash_mask & 0xFFFF);
-
-        if (LIKELY(match_count <= 2)) {
-            /* SPARSE: CTZ-based gap copying */
-            size_t wp = i;
-            uint32_t m = em_dash_mask;
-            while (m != 0) {
-                int bit = dashem_ctz(m);
-                size_t match_pos = i + bit;
-
-                if (match_pos > wp) {
-                    memcpy(out_ptr + out_idx, input + wp, match_pos - wp);
-                    out_idx += match_pos - wp;
-                }
-
-                wp = match_pos + 3;
-                m &= ~(1u << bit);
-                if (bit + 1 < 16) m &= ~(1u << (bit + 1));
-                if (bit + 2 < 16) m &= ~(1u << (bit + 2));
-            }
-
-            size_t chunk_end = i + 16;
-            if (wp <= chunk_end) {
-                if (wp < chunk_end) {
-                    memcpy(out_ptr + out_idx, input + wp, chunk_end - wp);
-                    out_idx += chunk_end - wp;
-                }
-                i = chunk_end;
-            } else {
-                i = wp;
-            }
-        } else {
-            /* DENSE: Mask-expansion + bit-extract */
-            uint32_t remove = em_dash_mask | (em_dash_mask << 1) | (em_dash_mask << 2);
-            uint32_t keep = (~remove) & 0xFFFF;
-
-            while (keep != 0) {
-                int pos = dashem_ctz(keep);
-                out_ptr[out_idx++] = in_ptr[i + pos];
-                keep &= keep - 1;
-            }
-
-            if (em_dash_mask & 0x8000u) {
-                i += 18;
-            } else if (em_dash_mask & 0x4000u) {
-                i += 17;
-            } else {
-                i += 16;
-            }
-        }
-    }
-
-    /* Process remainder */
-    while (i < input_len) {
-        if (i + 3 <= input_len &&
-            in_ptr[i] == 0xE2 &&
-            in_ptr[i + 1] == 0x80 &&
-            in_ptr[i + 2] == 0x94) {
-            i += 3;
-        } else {
-            out_ptr[out_idx++] = in_ptr[i++];
-        }
-    }
-
-    *output_len = out_idx;
-    return 0;
+    return dashem_run_blocks(dashem_blocks_ssse3, dashem_last_ssse3, 32,
+                             input, input_len, output, output_len);
 }
-#endif
 
-/* ============================================================================
- * BMI2 Implementation using PEXT/PDEP
- * ============================================================================ */
-
-#if defined(__BMI2__)
-#include <immintrin.h>
-
-/**
- * @brief BMI2 implementation using PEXT for byte compaction
- *
- * Uses the PEXT instruction to extract non-em-dash bytes based on a bitmask.
- * This provides 5-8x speedup on dense patterns.
- *
- * Available on:
- * - Intel Haswell+ (2013+): 3 cycle latency
- * - AMD Zen 3+ (2020+): 3 cycle latency
- * - AMD pre-Zen 3: 18 cycles (avoid)
- */
-static int dashem_remove_bmi2(
+DASHEM_TARGET("avx2")
+static int dashem_remove_avx2(
     const char *input,
     size_t input_len,
     char *output,
     size_t output_capacity,
     size_t *output_len
 ) {
-    if (output_capacity < input_len) {
-        return -1;
+    (void)output_capacity;
+    if (input_len < 64) {
+        if (input_len < 32) {
+            return dashem_remove_short(input, input_len, output, output_len);
+        }
+        return dashem_run_blocks(dashem_blocks_ssse3, dashem_last_ssse3, 32,
+                                 input, input_len, output, output_len);
     }
-
-    size_t out_idx = 0;
-    size_t i = 0;
-    size_t skip_until = 0;  /* Track position to skip until (for boundary-spanning em-dashes) */
-    const unsigned char *in_ptr = (const unsigned char *)input;
-    unsigned char *out_ptr = (unsigned char *)output;
-
-    /* REVOLUTIONARY: Use PEXT for hardware-accelerated byte compaction */
-    while (i + 8 <= input_len) {
-        /* Load 8 bytes as a 64-bit value */
-        uint64_t chunk;
-        memcpy(&chunk, in_ptr + i, 8);
-
-        /* Build mask of bytes to keep (1 = keep, 0 = skip) */
-        uint64_t keep_mask = 0xFFFFFFFFFFFFFFFFULL;
-
-        /* Handle bytes that should be skipped from previous chunk */
-        for (int j = 0; j < 8 && i + j < skip_until; j++) {
-            keep_mask &= ~(0xFFULL << (j * 8));
-        }
-
-        /* Check each byte position for em-dash start */
-        for (int j = 0; j < 8 && i + j + 2 < input_len; j++) {
-            /* Skip if this byte is part of an em-dash from previous chunk */
-            if (i + j < skip_until) {
-                continue;
-            }
-
-            if (in_ptr[i + j] == 0xE2 &&
-                in_ptr[i + j + 1] == 0x80 &&
-                in_ptr[i + j + 2] == 0x94) {
-                /* Found em-dash, clear the 3 bytes */
-                keep_mask &= ~(0xFFULL << (j * 8));      /* Clear byte j */
-
-                /* Update skip_until for bytes that span into next chunk */
-                size_t em_dash_end = i + j + 3;
-                if (em_dash_end > i + 8) {
-                    skip_until = em_dash_end;
-                }
-
-                /* Clear remaining bytes in this chunk */
-                for (int k = j + 1; k < 8 && k < j + 3; k++) {
-                    keep_mask &= ~(0xFFULL << (k * 8));
-                }
-
-                j += 2; /* Skip the next 2 bytes in the loop */
-            }
-        }
-
-        /* Fast path: no em-dashes in this chunk */
-        if (keep_mask == 0xFFFFFFFFFFFFFFFFULL) {
-            memcpy(out_ptr + out_idx, &chunk, 8);
-            out_idx += 8;
-            i += 8;
-            continue;
-        }
-
-        /* MAGIC: Use PEXT to extract only the bytes we want to keep */
-        /* PEXT extracts bits from chunk based on keep_mask */
-        uint64_t compacted = _pext_u64(chunk, keep_mask);
-
-        /* Count how many bytes we're keeping */
-        int bytes_kept = DASHEM_POPCOUNTLL(keep_mask) / 8;
-
-        /* Store the compacted bytes */
-        memcpy(out_ptr + out_idx, &compacted, bytes_kept);
-        out_idx += bytes_kept;
-
-        /* Advance input based on how many bytes had em-dashes */
-        i += 8;
-    }
-
-    /* Process remainder without PEXT */
-    while (i < input_len) {
-        if (i + 3 <= input_len &&
-            in_ptr[i] == 0xE2 &&
-            in_ptr[i + 1] == 0x80 &&
-            in_ptr[i + 2] == 0x94) {
-            /* Skip em-dash */
-            i += 3;
-        } else {
-            out_ptr[out_idx++] = in_ptr[i++];
-        }
-    }
-
-    *output_len = out_idx;
-    return 0;
+    return dashem_run_blocks(dashem_blocks_avx2, dashem_last_avx2, 64,
+                             input, input_len, output, output_len);
 }
-#endif  /* __BMI2__ */
+
+#if defined(DASHEM_X86_AVX512)
+DASHEM_TARGET("avx512f,avx512bw,avx512vbmi2,popcnt")
+static int dashem_remove_avx512_compress(
+    const char *input,
+    size_t input_len,
+    char *output,
+    size_t output_capacity,
+    size_t *output_len
+) {
+    (void)output_capacity;
+    if (input_len < 64) {
+        unsigned char *end = dashem_short_avx512(
+            (const unsigned char *)input, input_len, (unsigned char *)output);
+        *output_len = (size_t)(end - (unsigned char *)output);
+        return 0;
+    }
+    return dashem_run_blocks(dashem_blocks_avx512, dashem_last_avx512, 64,
+                             input, input_len, output, output_len);
+}
+#endif
+
+#endif  /* DASHEM_X86_KERNELS */
 
 /* ============================================================================
  * SIMD Implementation - ARM NEON (128-bit SIMD for ARM/ARM64)
@@ -1874,62 +1262,48 @@ static DASHEM_UNUSED int process_utf8_char(
  * Public API Implementation
  * ============================================================================ */
 
-/**
- * @brief In-situ optimized scalar implementation for in-place operations
- *
- * When input and output buffers are the same, we can use a more efficient
- * algorithm that avoids unnecessary copying. This provides 15-25% speedup.
- */
-static DASHEM_ALWAYS_INLINE int dashem_remove_insitu(
-    const char *buffer,
-    size_t input_len,
-    size_t *output_len
-) {
-    size_t read_pos = 0;
-    size_t write_pos = 0;
-    const unsigned char *in_ptr = (const unsigned char *)buffer;
-    unsigned char *out_ptr = (unsigned char *)buffer;
 
-    /* SWAR fast-skip: while read and write positions are identical,
-     * scan 8 bytes at a time for 0xE2 - skip past safe regions without copying */
-    while (read_pos == write_pos && read_pos + 10 <= input_len) {
-        uint64_t chunk;
-        memcpy(&chunk, in_ptr + read_pos, 8);
-        uint64_t test = chunk ^ 0xE2E2E2E2E2E2E2E2ULL;
-        uint64_t has_e2 = (test - 0x0101010101010101ULL) & ~test & 0x8080808080808080ULL;
+/* Picks the fastest kernel the CPU supports. */
+static const dashem_impl_t *dashem_select_impl(void) {
+    static const dashem_impl_t scalar = { dashem_remove_scalar, "Scalar", 0 };
+    uint32_t features = dashem_detect_cpu_features();
+    (void)features;
 
-        if (LIKELY(has_e2 == 0)) {
-            /* No 0xE2 bytes - positions stay in sync, just advance both */
-            read_pos += 8;
-            write_pos += 8;
-        } else {
-            /* Found 0xE2 - skip to it, then check for em-dash */
-            int first_e2_byte = dashem_ctzll(has_e2) >> 3;
-            read_pos += first_e2_byte;
-            write_pos += first_e2_byte;
-            break;
-        }
+#if defined(DASHEM_X86_AVX512)
+    static const dashem_impl_t avx512 = { dashem_remove_avx512_compress, "AVX-512 VBMI2 (VPCOMPRESSB)", 1 };
+    if (features & DASHEM_CPU_AVX512VBMI2) {
+        return &avx512;
     }
+#endif
 
-    while (read_pos < input_len) {
-        if (read_pos + 3 <= input_len &&
-            in_ptr[read_pos] == 0xE2 &&
-            in_ptr[read_pos + 1] == 0x80 &&
-            in_ptr[read_pos + 2] == 0x94) {
-            /* Skip em-dash (3 bytes) */
-            read_pos += 3;
-        } else {
-            /* Copy single byte (only if write position changed) */
-            if (write_pos != read_pos) {
-                out_ptr[write_pos] = in_ptr[read_pos];
-            }
-            write_pos++;
-            read_pos++;
-        }
+#if defined(DASHEM_X86_KERNELS)
+    static const dashem_impl_t avx2 = { dashem_remove_avx2, "AVX2", 1 };
+    static const dashem_impl_t sse42 = { dashem_remove_sse42, "SSE4.2", 1 };
+    if (features & DASHEM_CPU_AVX2) {
+        return &avx2;
     }
+    if (features & DASHEM_CPU_SSE42) {
+        return &sse42;
+    }
+#endif
 
-    *output_len = write_pos;
-    return 0;
+#if defined(__ARM_NEON)
+    static const dashem_impl_t neon = { dashem_remove_neon, "NEON", 0 };
+    if (features & DASHEM_CPU_NEON) {
+        return &neon;
+    }
+#endif
+
+    return &scalar;
+}
+
+static const dashem_impl_t *dashem_get_impl(void) {
+    const dashem_impl_t *impl = g_dashem_impl;
+    if (UNLIKELY(impl == NULL)) {
+        impl = dashem_select_impl();
+        g_dashem_impl = impl;
+    }
+    return impl;
 }
 
 int dashem_remove(
@@ -1943,29 +1317,22 @@ int dashem_remove(
         return -2;
     }
 
-    /* Fast path for small inputs (< 32 bytes) - avoids SIMD overhead */
-    if (UNLIKELY(input_len < 32)) {
-        return dashem_remove_fast_small(input, input_len, output, output_capacity, output_len);
-    }
+    const dashem_impl_t *impl = dashem_get_impl();
 
-    /* In-situ optimization: when input == output (in-place operation)
-     * This provides 15-25% speedup by avoiding buffer management overhead
-     */
+    /* In place (input == output). The output never grows, so the capacity
+     * check does not apply. */
     if (UNLIKELY((const void *)input == (const void *)output)) {
+        if (impl->in_place) {
+            return impl->fn(input, input_len, output, output_capacity, output_len);
+        }
         return dashem_remove_insitu(input, input_len, output_len);
     }
 
-    /* Regular path with separate buffers */
     if (UNLIKELY(output_capacity < input_len)) {
         return -1;
     }
 
-    /* Initialize optimal implementation on first call, then use cached function pointer */
-    if (g_dashem_remove_impl == NULL) {
-        g_dashem_remove_impl = dashem_init_impl();
-    }
-
-    return g_dashem_remove_impl(input, input_len, output, output_capacity, output_len);
+    return impl->fn(input, input_len, output, output_capacity, output_len);
 }
 
 const char* dashem_version(void) {
@@ -1973,49 +1340,8 @@ const char* dashem_version(void) {
 }
 
 const char* dashem_implementation_name(void) {
-    uint32_t features = dashem_detect_cpu_features();
-
-#if defined(__AVX512VBMI2__) && defined(__AVX512BW__)
-    if (features & DASHEM_CPU_AVX512VBMI2) {
-        return "AVX-512 VBMI2 (VPCOMPRESSB)";
-    }
-#endif
-
-#if defined(__AVX512F__)
-    if (features & DASHEM_CPU_AVX512F) {
-        return "AVX-512F";
-    }
-#endif
-
-/* BMI2 disabled - needs optimization
-#if defined(__BMI2__)
-    if (features & DASHEM_CPU_BMI2) {
-        return "BMI2 (PEXT/PDEP)";
-    }
-#endif
-*/
-
-#if defined(__AVX2__)
-    if (features & DASHEM_CPU_AVX2) {
-        return "AVX2";
-    }
-#endif
-
-#if defined(__SSE4_2__)
-    if (features & DASHEM_CPU_SSE42) {
-        return "SSE4.2";
-    }
-#endif
-
-#if defined(__ARM_NEON)
-    if (features & DASHEM_CPU_NEON) {
-        return "NEON";
-    }
-#endif
-
-    return "Scalar";
+    return dashem_get_impl()->name;
 }
-
 /**
  * @brief Remove em-dashes with UTF-8 validation
  *
