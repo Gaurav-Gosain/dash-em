@@ -27,7 +27,7 @@ def test_implementation():
     print("Test 2: Implementation")
     impl = dashem.implementation_name()
     print(f"[PASS] Implementation: {impl}\n")
-    valid_impls = ("AVX2", "SSE4.2", "NEON", "scalar", "Scalar")
+    valid_impls = ("AVX-512 VBMI2 (VPCOMPRESSB)", "AVX2", "SSE4.2", "NEON", "scalar", "Scalar")
     assert impl in valid_impls, f"Unknown implementation: {impl}"
 
 

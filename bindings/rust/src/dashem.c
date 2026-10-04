@@ -1120,7 +1120,8 @@ static int dashem_remove_neon(
             keep_lo &= ~((uint64_t)0xFF << bit);
         }
 
-        uint64_t remove_hi = hi | (hi << 8) | (hi << 16);
+        /* An em-dash starting at byte 6 or 7 ends in the high half. */
+        uint64_t remove_hi = hi | (hi << 8) | (hi << 16) | (lo >> 48) | (lo >> 56);
         uint64_t keep_hi = ~remove_hi;
 
         while (keep_hi != 0) {
