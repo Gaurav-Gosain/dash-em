@@ -27,11 +27,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up CMake
-        uses: jwlawson/actions-setup-cmake@v1
-        with:
-          cmake-version: '3.30.x'
-
+      # Use the runner's own CMake. A pinned older CMake does not know the
+      # Visual Studio on newer Windows images and falls back to NMake.
       - name: Create build directory
         run: mkdir build
 
@@ -145,19 +142,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up CMake
-        uses: jwlawson/actions-setup-cmake@v1
-        with:
-          cmake-version: '3.30.x'
-
-      - name: Build C library (required for Go tests)
-        run: |
-          mkdir -p build
-          cd build
-          cmake .. -DCMAKE_BUILD_TYPE=Release
-          cmake --build . --config Release
-        shell: bash
-
+      # cgo compiles go/dashem.c directly, so the C library is not needed.
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
@@ -166,22 +151,10 @@ jobs:
       - name: Build
         run: go build -v
         working-directory: go
-        env:
-          CGO_LDFLAGS: -L../build
 
       - name: Run tests
-        shell: bash
-        run: |
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            # Skip tests on Windows - CMake creates .lib files, not .a
-            echo "Skipping tests on Windows due to library format differences"
-            exit 0
-          fi
-          go test -v ./...
+        run: go test -v ./...
         working-directory: go
-        env:
-          CGO_LDFLAGS: -L../build
-          LD_LIBRARY_PATH: ../build:$LD_LIBRARY_PATH
 
   build-java:
     name: Build Java Bindings
