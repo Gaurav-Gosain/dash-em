@@ -1,280 +1,91 @@
 # dash-em
 
-> **Enterprise-Grade Em-Dash Removal Infrastructure** — Leveraging Advanced SIMD Vectorization for Optimal Character Stream Processing
+> **Enterprise-Grade Em-Dash Removal Infrastructure** — SIMD-accelerated, runtime-dispatched, fuzz-tested, and still not sure why it exists
 
 ---
 
 ## Overview
 
-dash-em is an **absurdly over-engineered**, **deliberately meme-grade**, **production-ready**, **enterprise-certified** string manipulation library designed with singular, unwavering purpose—**removing em-dashes (U+2014)** from UTF-8 encoded text—with unprecedented obsession.
+dash-em removes one character from text. That character is the em-dash (U+2014, `E2 80 94` in UTF-8). It removes it very, very fast.
 
-Building upon decades of accumulated wisdom in systems programming—combined with cutting-edge SIMD acceleration techniques—dash-em delivers truly unnecessary—yet deeply satisfying—performance characteristics in the em-dash elimination category.
+It does nothing else. It has no plans to do anything else. It has a roadmap anyway.
 
-> 🎭 **MEME REPOSITORY DISCLOSURE** — This project is a deliberately absurd, tongue-in-cheek exploration of over-engineering. The em-dash removal use case is intentionally ridiculous. This is **not** serious production software, despite being written with genuine engineering rigor. Enjoy the absurdity.
+> **MEME REPOSITORY DISCLOSURE** — This project is a joke about over-engineering. The engineering is not a joke. The kernels are real, the fuzz tests are real, and the bugs we found in them were extremely real.
 
 ### Key Value Propositions
 
-- ⚡ **SIMD-Accelerated Processing** — Employing SSE4.2, AVX, AVX2, AVX-512F, and ARM NEON instruction sets for—optimal throughput
-- 🚀 **Extraordinary Performance** — Up to **538x faster** than byte-level iteration—in language bindings
-- 🔒 **Memory-Safe Architecture** — Engineered with defensive programming—paradigms throughout
-- 📦 **Zero External Dependencies** — Pure C implementation—no transitive dependency chains
-- 🌍 **True Cross-Platform Support** — Linux, macOS, Windows—and ARM-based systems—all supported
-- 🎯 **Polyglot Language Support** — 20+ language bindings—ensuring accessibility across heterogeneous technology stacks
-- 🏢 **Enterprise-Ready Infrastructure** — Battle-tested, production-hardened, deployable—at scale
+- **SIMD-Accelerated Processing** — AVX-512 VBMI2, AVX2, SSE4.2, ARM NEON, and a scalar fallback for the brave
+- **Runtime Dispatch** — Build once with generic flags. The library asks the CPU what it can do and picks a kernel when it runs
+- **Zero External Dependencies** — One C file. One header. One purpose. Zero chill
+- **Polyglot Support** — Bindings for Python, Node.js, Go, Rust, Java, C#, PHP, Ruby and Swift. Ten more directories exist and contain nothing, which we consider a minimalist design statement
+- **Enterprise-Ready** — We have a citation block, three version numbers and a bot. That is the definition of enterprise
 
 ---
 
-## Features
+## The Meta Section
 
-### What makes dash-em fast?
+Some facts about this repository. All of them are true. We checked.
 
-Instead of checking characters one by one—which is slow—dash-em uses SIMD instructions to process 16–64 bytes in parallel. Modern CPUs can do this crazy fast—we just have to tell them what to do.
+- **This README contains 26 em-dashes.** dash-em removes all of them in about 330 nanoseconds on an Intel i7-10700. We keep them in on purpose. A README without em-dashes would be a product demo, and a product demo is marketing.
+- **The bot has more commits than the humans.** The nightly benchmark job commits fresh numbers to this README. It has made more than 200 commits. The humans have made about 100. The bot does not take holidays.
+- **The README had a memory leak.** Each nightly run added one blank line under the `## Performance` heading. After 216 runs, the section began with 216 empty lines. That is one blank line per bot commit. The leak is fixed. The bot has not been told.
+- **macOS CI was red for seven months.** A NEON "optimization" removed only the first byte of some em-dashes. It left the other two (`80 94`) in the text, where they sat like the ghost of punctuation. Nobody noticed, because the CI badge was not in the README. It is fixed.
+- **The AVX-512 VBMI2 kernel was labeled "REVOLUTIONARY" in a comment.** It returned the wrong output in 49% of fuzz cases on the exact CPUs it was written for. It also read past the end of your buffer. It has been replaced by a kernel with a less exciting comment and a 0% failure rate.
+- **The latest speedups were written by an AI model.** AI models are the leading global supplier of em-dashes. We see no conflict of interest.
+- **dash-em has three version numbers.** The CMake project says 1.0.1. The CMake package config says 1.0.0. The header and the bindings say 1.1.2. Pick the one that matches your risk tolerance.
 
-**Real-world speedups** (measured across multiple architectures):
-- **Core C library**: 5x-11x faster than scalar implementation—depending on CPU architecture
-- **Python bindings**: 211x-538x faster than byte-level iteration
-- **JavaScript bindings**: 2x-31x faster than byte-level Buffer manipulation
-- **Best case** (no em-dashes—fast path): Up to **15.58 GB/s throughput** on modern x86-64
+---
 
-### How it works
+## How It Works
 
-The library auto-detects your CPU and picks the fastest path:
+### Runtime dispatch
 
-1. **AVX-512F** (if available) — 64 bytes per iteration. Cutting edge. Stupid fast.
-2. **AVX2** (fallback) — 32 bytes per iteration. Still very fast. Works on most modern CPUs.
-3. **SSE4.2** (older systems) — 16 bytes per iteration. Slower but still beats naive approaches.
-4. **ARM NEON** (ARM/Apple Silicon) — 16 bytes per iteration. Works on servers and M-series Macs.
-5. **Scalar** (last resort) — One byte at a time. Works everywhere.
+The library checks the CPU once, on the first call, and caches the result. Each x86 kernel is compiled for its own instruction set, so a Python wheel or a Rust crate built for generic x86-64 still gets AVX2 or AVX-512 on a machine that has them. Before this change, those builds ran the scalar loop. They were very portable and very slow.
 
-### Optimizations under the hood
+| Kernel | Bytes per step | Notes |
+|--------|----------------|-------|
+| AVX-512 VBMI2 | 64 | Packs the kept bytes with `VPCOMPRESSB`. Ice Lake and newer Intel, Zen 4 and newer AMD |
+| AVX2 | 64 | Packs the kept bytes with a `pshufb` lookup table. Most x86 CPUs since 2013 |
+| SSE4.2 | 32 | Same algorithm, half the width, for CPUs that remember Windows 7 |
+| NEON | 16 to 64 | ARM servers and Apple Silicon |
+| Scalar | 8 | SWAR bit tricks. Works on a toaster, if the toaster has a C compiler |
 
-- **Fast path for tiny strings** — If you're only removing dashes from a few characters, we skip SIMD overhead
-- **Loop unrolling** — Process multiple chunks per iteration to keep the CPU pipeline full
-- **Cache prefetching** — Tell the CPU to load the next chunk early so it's ready when we need it
-- **Bitmask matching** — Use clever bit tricks to find patterns instead of checking bytes individually
-- **Smart memory operations** — Bulk copy unchanged regions instead of processing byte-by-byte
+### The algorithm
 
-It's absurdly optimized. Maybe too optimized. But it works—and it's fast.
+Every x86 kernel does the same five steps for each block:
+
+1. Compare the block, the block shifted by one byte, and the block shifted by two bytes against `E2`, `80` and `94`.
+2. AND the three results. Each set bit marks the start of an em-dash.
+3. Expand each start bit to cover all three bytes. Carry up to two bytes into the next block, for em-dashes that start at the end of a block.
+4. Pack the kept bytes together with one shuffle (or one `VPCOMPRESSB`).
+5. Store them. Move on. Never look back. Never look for an em-dash that is not there.
+
+Blocks without an `E2` byte take a fast path that is one compare and one store. The work per block does not depend on how many em-dashes it contains, so dense text no longer falls off a cliff.
+
+### Speedups from the rewrite
+
+Measured on an Intel i7-10700 (AVX2), best of several runs:
+
+| Case | Before | After |
+|------|--------|-------|
+| Dense (25% em-dashes) | 4.5 GB/s | 7.0 GB/s |
+| Alternating | 4.4 GB/s | 7.1 GB/s |
+| Sparse, in place | 1.4 GB/s | 16.5 GB/s |
+| Dense, in place | 2.5 GB/s | 7.1 GB/s |
+| 64-byte string | 20.6 ns | 6.6 ns |
+| Python wheel, any pattern | scalar | AVX2 or better |
+
+Text with no em-dashes was already limited by memory bandwidth. It stays at about 26 GB/s. You cannot remove em-dashes faster than you can read the text. We tried.
+
+### How we know it works
+
+Each kernel runs against a reference implementation for every input length up to 4,160 bytes. The tests cover out-of-place and in-place calls, random alignments, and exact-size heap buffers under AddressSanitizer and UndefinedBehaviorSanitizer. The AVX-512 kernel runs under the Intel Software Development Emulator, because the development machine does not have AVX-512 and refused to grow it. The NEON kernel runs on x86 through a plain-C model of the eight NEON intrinsics it uses.
+
+To check the checker, we broke the carry logic on purpose. The fuzz test reported 6,917 failures. Then we fixed it again.
 
 ---
 
 ## Performance
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 ### Core Library Performance
 
@@ -443,22 +254,13 @@ print(result)  // Output: Helloworld
 
 #### Additional Language Bindings
 
-Comprehensive bindings are provided for—and thoroughly tested against—the following languages:
+Directories exist for Kotlin, R, Dart, Scala, Perl, Lua, Haskell, Elixir, Zig and Objective-C. They are empty. They have never failed a test. They have a 100% pass rate and a 0% line count, which is the best ratio in the repository.
 
-- **Kotlin** — Native interop with dash-em core
-- **R** — Rcpp-based integration layer
-- **Dart** — dart:ffi bindings for cross-platform applications
-- **Scala** — Native compilation via Scala Native
-- **Perl** — XS extension module—providing optimal performance characteristics
-- **Lua** — Lightweight C API integration
-- **Haskell** — Pure FFI bindings—maintaining functional purity
-- **Elixir** — NIF-based native implementation—ensuring BEAM compatibility
-- **Zig** — C ABI import with modern language ergonomics
-- **Objective-C** — Direct C interoperability layer
+Pull requests that put code in them are welcome. Pull requests that remove them will be considered an attack on our language support numbers.
 
 ### WebAssembly
 
-dash-em compiles to—high-performance WebAssembly modules supporting multiple target specifications:
+dash-em compiles to WebAssembly, where it uses the scalar kernel and contemplates its life choices:
 
 ```bash
 # wasm32 (Emscripten)
@@ -472,29 +274,25 @@ WASI_SDK_PATH=/opt/wasi-sdk ./build.sh wasi
 
 ## Architecture
 
-The dispatch system checks your CPU once, then uses the best available implementation for all subsequent calls:
-
 ```mermaid
 graph TD
-    A["dashem_remove()"] --> B{Input < 32 bytes?}
-    B -->|Yes| C["fast_small() scalar"]
-    B -->|No| D["Check CPU capabilities<br/>(cached after first call)"]
-    D --> E{AVX-512?}
-    E -->|Yes| F["dashem_remove_avx512"]
-    E -->|No| G{AVX2?}
-    G -->|Yes| H["dashem_remove_avx2_unrolled"]
-    G -->|No| I{SSE4.2?}
-    I -->|Yes| J["dashem_remove_sse42"]
-    I -->|No| K{ARM NEON?}
-    K -->|Yes| L["dashem_remove_neon"]
-    K -->|No| M["dashem_remove_scalar"]
-    C --> N["Output"]
-    F --> N
-    H --> N
-    J --> N
-    L --> N
-    M --> N
+    A["dashem_remove()"] --> B{"First call?"}
+    B -->|Yes| C["Ask the CPU (CPUID + XGETBV)<br/>and cache the answer"]
+    B -->|No| D{"Cached kernel"}
+    C --> D
+    D -->|AVX-512 VBMI2| E["64-byte blocks<br/>VPCOMPRESSB"]
+    D -->|AVX2| F["64-byte blocks<br/>pshufb lookup table"]
+    D -->|SSE4.2| G["32-byte blocks<br/>pshufb lookup table"]
+    D -->|NEON| H["16 to 64-byte blocks"]
+    D -->|none of the above| I["Scalar SWAR<br/>8 bytes at a time"]
+    E --> J["Text, now with fewer em-dashes"]
+    F --> J
+    G --> J
+    H --> J
+    I --> J
 ```
+
+Very short inputs use the scalar code (or masked loads on AVX-512). The last partial block of a long input is processed as one more full block that ends at the end of the input, so the kernels never read past your buffer. We used to read past your buffer. We apologize to your buffer.
 
 ---
 
@@ -508,10 +306,13 @@ graph TD
  *
  * @param input       Input UTF-8 string
  * @param input_len   Length of input in bytes
- * @param output      Output buffer
- * @param output_cap  Output buffer capacity
+ * @param output      Output buffer (may equal input for in-place use)
+ * @param output_cap  Output buffer capacity (at least input_len)
  * @param output_len  Output length (set on return)
  * @return 0 on success, -1 on buffer overflow, -2 on invalid input
+ *
+ * Bytes of the output buffer after *output_len, up to input_len,
+ * may be overwritten with scratch data.
  */
 int dashem_remove(
     const char *input,
@@ -523,13 +324,13 @@ int dashem_remove(
 
 /**
  * Get library version
- * @return Version string (e.g., "1.0.0")
+ * @return Version string (one of our several version numbers)
  */
 const char* dashem_version(void);
 
 /**
  * Get active implementation name
- * @return Implementation name (e.g., "AVX2", "SSE4.2", "Scalar")
+ * @return "AVX-512 VBMI2 (VPCOMPRESSB)", "AVX2", "SSE4.2", "NEON" or "Scalar"
  */
 const char* dashem_implementation_name(void);
 
@@ -587,28 +388,17 @@ dashem.implementationName();
 
 ## Running Benchmarks
 
-Performance benchmarks are automatically updated via GitHub Actions. See the **Performance** section above for the latest results across all architectures and language bindings.
+A bot runs the benchmarks every night and commits the results to the Performance section above. Please do not edit that section by hand. The bot will overwrite your changes, and it has more commit access than you think.
 
 To run benchmarks locally:
 
-**C/C++ Core Library:**
 ```bash
-cd build && ./bench_dashem
+cd build && ./bench_statistical
 ```
-
-**Multi-Language Benchmarks:**
-```bash
-cd benchmarks
-./run_all_benchmarks.sh
-```
-
-Results are generated in JSON format for easy integration with continuous performance monitoring systems.
 
 ---
 
 ## Testing
-
-Comprehensive test suites—validated across all supported platforms—ensure—correctness and reliability:
 
 ```bash
 # C/C++ tests
@@ -625,24 +415,19 @@ go test ./...         # Go
 
 ## Continuous Integration
 
-dash-em leverages GitHub Actions—to ensure—consistent quality across:
+GitHub Actions builds and tests the library and the bindings on Linux, macOS (Apple Silicon) and Windows (MSVC). Benchmarks run on x86-64 with GCC, Clang and MSVC, and on ARM64.
 
-- ✓ Linux (x86_64, ARM64)—builds and tests
-- ✓ macOS (Intel, Apple Silicon)—native execution
-- ✓ Windows (MSVC, MinGW)—compatibility verification
-- ✓ WebAssembly (Emscripten, WASI)—cross-compilation
-- ✓ All language bindings—comprehensive integration testing
+The CI is green when the em-dashes are gone. When the CI is red, an em-dash has escaped. Treat it as a security incident.
 
 ---
 
 ## Contributing
 
-Contributions are welcome! Please ensure:
+Contributions are welcome. Please make sure that:
 
-- Code adheres to—professional C/C++ standards—with comprehensive documentation
-- Commit messages are—descriptive and—reference relevant issues
-- All tests pass—before submitting—pull requests
-- Performance characteristics are—benchmarked against—baseline implementations
+- All tests pass
+- Performance claims come with a benchmark
+- Comments that say "REVOLUTIONARY" come with a fuzz test
 
 ---
 
@@ -654,7 +439,7 @@ MIT License — See [LICENSE](LICENSE) file for details.
 
 ## Citation
 
-If dash-em is utilized in—academic or—commercial contexts, please reference:
+If dash-em is used in academic or commercial work, please cite it. Then please tell us why.
 
 ```bibtex
 @software{gosain2025dashem,
@@ -675,4 +460,4 @@ This project exists because—em-dashes matter—and they deserve—the most eff
 
 ---
 
-**Version:** 1.0.1 | **Status:** Production-Ready | **License:** MIT | **Repository:** [github.com/Gaurav-Gosain/dash-em](https://github.com/Gaurav-Gosain/dash-em)
+**Version:** 1.0.1 (or 1.1.2, or 1.0.0) | **Status:** Production-Ready | **License:** MIT | **Repository:** [github.com/Gaurav-Gosain/dash-em](https://github.com/Gaurav-Gosain/dash-em)

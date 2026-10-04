@@ -198,13 +198,15 @@ def update_readme(readme_path: Path, results_path: Path) -> bool:
     new_table = "\n".join(new_table_lines)
 
     # Find and replace the entire Performance section (from ## Performance to next ##)
-    perf_section_pattern = r'(## Performance\s*\n)(.*?)(\n## )'
+    # The heading is captured without its trailing blank lines. Writing them
+    # back added one blank line per nightly run.
+    perf_section_pattern = r'(## Performance)[ \t]*\n(.*?)(\n## )'
 
     if re.search(perf_section_pattern, readme_content, re.DOTALL):
         # Replace the entire performance section content
         updated_content = re.sub(
             perf_section_pattern,
-            r'\1' + "\n" + new_table + "\n" + r'\3',
+            lambda m: m.group(1) + "\n\n" + new_table + "\n" + m.group(3),
             readme_content,
             count=1,
             flags=re.DOTALL
