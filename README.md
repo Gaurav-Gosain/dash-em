@@ -91,14 +91,14 @@ To check the checker, we broke the carry logic on purpose. The fuzz test reporte
 
 Multi-architecture SIMD performance (statistical benchmarks):
 
-| Pattern | ubuntu-22.04-gcc | windows-2022-msvc | macos-14-aarch64 | ubuntu-22.04-clang |
+| Pattern | macos-14-aarch64 | windows-2022-msvc | ubuntu-22.04-gcc | ubuntu-22.04-clang |
 |---------|----------|----------|----------|----------|
-| sparse | 27.00 GB/s (18.48x) | 26.86 GB/s (26.95x) | 26.90 GB/s (22.53x) | 39.41 GB/s (23.48x) |
-| moderate | 10.47 GB/s (7.73x) | 11.94 GB/s (12.46x) | 5.78 GB/s (5.00x) | 26.38 GB/s (15.17x) |
-| dense | 6.13 GB/s (2.54x) | 5.91 GB/s (2.94x) | 1.70 GB/s (1.09x) | 20.66 GB/s (7.52x) |
-| alternating | 6.29 GB/s (2.62x) | 6.01 GB/s (3.00x) | 1.54 GB/s (1.00x) | 18.96 GB/s (8.28x) |
-| boundary | 19.12 GB/s (13.62x) | 18.52 GB/s (18.55x) | 8.80 GB/s (6.57x) | 37.82 GB/s (22.63x) |
-| no | 35.44 GB/s (24.07x) | 28.04 GB/s (27.95x) | 49.92 GB/s (41.39x) | 39.44 GB/s (23.27x) |
+| sparse | 25.11 GB/s (21.53x) | 42.56 GB/s (37.30x) | 26.67 GB/s (18.24x) | 28.67 GB/s (43.51x) |
+| moderate | 5.86 GB/s (5.07x) | 31.08 GB/s (26.63x) | 10.98 GB/s (8.06x) | 9.95 GB/s (14.64x) |
+| dense | 1.65 GB/s (1.09x) | 21.91 GB/s (9.59x) | 6.31 GB/s (2.62x) | 5.61 GB/s (4.73x) |
+| alternating | 1.24 GB/s (1.09x) | 23.38 GB/s (10.13x) | 6.26 GB/s (2.60x) | 5.50 GB/s (4.64x) |
+| boundary | 9.19 GB/s (6.71x) | 38.15 GB/s (33.75x) | 19.12 GB/s (13.62x) | 18.23 GB/s (27.21x) |
+| no | 45.71 GB/s (42.94x) | 45.14 GB/s (39.43x) | 34.33 GB/s (23.97x) | 32.39 GB/s (48.95x) |
 
 ### Language Bindings Performance
 
@@ -106,17 +106,17 @@ Comparing dash-em bindings against native byte-level implementations:
 
 | Language | Test Pattern | Native (μs) | dash-em (μs) | Speedup |
 |----------|--------------|-------------|--------------|---------|
-| javascript | alternating | 88.6 | 13.0 | 6.82x |
-| javascript | dense | 121.6 | 31.3 | 3.88x |
-| javascript | moderate | 291.1 | 10.7 | 27.15x |
-| javascript | no | 3013.5 | 80.0 | 37.67x |
-| javascript | sparse | 2843.7 | 70.0 | 40.60x |
-| python | alternating | 3706.4 | 7.10 | 522.11x |
-| python | dense | 7855.5 | 12.5 | 630.56x |
-| python | moderate | 20866.1 | 19.2 | 1085.18x |
-| python | no | 209790.9 | 196.2 | 1069.24x |
-| python | sparse | 208766.0 | 345.0 | 605.08x |
-<!-- Performance table last updated: 2026-10-19T07:05:31.640495 -->
+| javascript | alternating | 90.0 | 9.19 | 9.79x |
+| javascript | dense | 114.5 | 16.4 | 6.96x |
+| javascript | moderate | 321.2 | 11.6 | 27.63x |
+| javascript | no | 2996.6 | 80.6 | 37.18x |
+| javascript | sparse | 2935.1 | 86.7 | 33.85x |
+| python | alternating | 3959.3 | 7.43 | 532.90x |
+| python | dense | 8320.4 | 12.6 | 658.58x |
+| python | moderate | 21075.1 | 19.4 | 1086.08x |
+| python | no | 211678.4 | 188.5 | 1122.75x |
+| python | sparse | 209852.1 | 352.0 | 596.15x |
+<!-- Performance table last updated: 2026-10-20T06:50:30.043980 -->
 
 
 ## Installation
