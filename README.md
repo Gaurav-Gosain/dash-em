@@ -91,14 +91,14 @@ To check the checker, we broke the carry logic on purpose. The fuzz test reporte
 
 Multi-architecture SIMD performance (statistical benchmarks):
 
-| Pattern | macos-14-aarch64 | windows-2022-msvc | ubuntu-22.04-gcc | ubuntu-22.04-clang |
+| Pattern | ubuntu-22.04-gcc | windows-2022-msvc | macos-14-aarch64 | ubuntu-22.04-clang |
 |---------|----------|----------|----------|----------|
-| sparse | 23.55 GB/s (19.79x) | 26.83 GB/s (27.84x) | 28.92 GB/s (22.21x) | 38.92 GB/s (23.21x) |
-| moderate | 5.75 GB/s (5.06x) | 11.86 GB/s (12.30x) | 11.29 GB/s (8.46x) | 24.65 GB/s (14.20x) |
-| dense | 1.62 GB/s (1.04x) | 6.11 GB/s (3.03x) | 5.83 GB/s (2.73x) | 23.35 GB/s (8.51x) |
-| alternating | 1.52 GB/s (1.09x) | 5.82 GB/s (2.97x) | 6.24 GB/s (2.93x) | 23.03 GB/s (10.03x) |
-| boundary | 8.87 GB/s (6.86x) | 18.50 GB/s (19.06x) | 18.69 GB/s (14.33x) | 37.95 GB/s (22.56x) |
-| no | 43.88 GB/s (36.95x) | 29.22 GB/s (28.43x) | 32.53 GB/s (24.72x) | 39.72 GB/s (23.43x) |
+| sparse | 26.42 GB/s (18.06x) | 30.81 GB/s (34.81x) | 27.49 GB/s (20.44x) | 26.10 GB/s (35.25x) |
+| moderate | 9.62 GB/s (7.11x) | 10.90 GB/s (12.09x) | 6.13 GB/s (5.07x) | 9.32 GB/s (12.78x) |
+| dense | 6.28 GB/s (2.61x) | 6.01 GB/s (3.37x) | 1.65 GB/s (1.09x) | 5.28 GB/s (3.94x) |
+| alternating | 6.24 GB/s (2.59x) | 5.77 GB/s (3.18x) | 1.64 GB/s (1.09x) | 5.27 GB/s (3.93x) |
+| boundary | 18.94 GB/s (13.53x) | 18.38 GB/s (21.06x) | 9.50 GB/s (7.67x) | 17.04 GB/s (23.11x) |
+| no | 35.36 GB/s (24.01x) | 34.49 GB/s (51.62x) | 40.08 GB/s (30.17x) | 32.95 GB/s (44.96x) |
 
 ### Language Bindings Performance
 
@@ -106,17 +106,17 @@ Comparing dash-em bindings against native byte-level implementations:
 
 | Language | Test Pattern | Native (μs) | dash-em (μs) | Speedup |
 |----------|--------------|-------------|--------------|---------|
-| javascript | alternating | 26.5 | 2.80 | 9.44x |
-| javascript | dense | 57.8 | 7.16 | 8.07x |
-| javascript | moderate | 137.7 | 16.2 | 8.51x |
-| javascript | no | 1351.3 | 35.6 | 37.91x |
-| javascript | sparse | 1309.8 | 72.0 | 18.20x |
-| python | alternating | 3827.7 | 7.10 | 539.27x |
-| python | dense | 8114.1 | 12.3 | 658.30x |
-| python | moderate | 20957.8 | 19.0 | 1105.37x |
-| python | no | 206624.6 | 190.8 | 1083.13x |
-| python | sparse | 205782.7 | 341.9 | 601.95x |
-<!-- Performance table last updated: 2026-10-22T06:51:12.006786 -->
+| javascript | alternating | 83.8 | 17.5 | 4.78x |
+| javascript | dense | 123.8 | 32.6 | 3.80x |
+| javascript | moderate | 294.5 | 10.9 | 27.13x |
+| javascript | no | 3020.8 | 77.5 | 38.99x |
+| javascript | sparse | 2841.2 | 68.1 | 41.72x |
+| python | alternating | 2918.2 | 3.22 | 906.56x |
+| python | dense | 6140.3 | 6.26 | 980.44x |
+| python | moderate | 15783.2 | 13.0 | 1213.85x |
+| python | no | 159258.6 | 185.6 | 858.11x |
+| python | sparse | 155653.2 | 172.6 | 901.77x |
+<!-- Performance table last updated: 2026-10-23T06:42:35.393551 -->
 
 
 ## Installation
